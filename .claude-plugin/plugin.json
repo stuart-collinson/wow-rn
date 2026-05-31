@@ -1,0 +1,9 @@
+{
+  "name": "rn-ways-of-working",
+  "description": "React Native (Expo) engineering standards — gates, skills, agents, hooks",
+  "version": "0.1.0",
+  "author": {
+    "name": "Stuart Collinson"
+  },
+  "repository": "https://github.com/stuart-collinson/wow-rn"
+}

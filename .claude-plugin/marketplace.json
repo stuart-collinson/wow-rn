@@ -1,0 +1,14 @@
+{
+  "name": "rn-ways-of-working",
+  "owner": {
+    "name": "Stuart Collinson",
+    "url": "https://github.com/stuart-collinson"
+  },
+  "plugins": [
+    {
+      "name": "rn-ways-of-working",
+      "source": "./",
+      "description": "React Native / Expo engineering standards"
+    }
+  ]
+}
