@@ -48,11 +48,11 @@ apps/mobile/
 ├── src/
 │   ├── components/             # UI components (each in its own folder)
 │   │   └── ui/                 # gluestack-ui copy-in primitives (kebab-case, owned by the CLI)
-│   ├── hooks/                  # Custom hooks (useWorkoutFilters.ts)
+│   ├── hooks/                  # Generic UI hooks only (useDebounce.ts) — data hooks live with their domain
 │   ├── stores/                 # Zustand stores (useSessionStore.ts)
 │   ├── providers/              # React Context providers (cross-cutting client state)
 │   ├── lib/                    # Non-React utilities + integrations
-│   │   ├── api/                # Typed fetch wrappers (one file per resource)
+│   │   ├── api/                # One module per domain: fetchers + query keys + cache timing + query/mutation hooks (see frontend-patterns)
 │   │   ├── supabase.ts         # Supabase client (storage adapter, auth config)
 │   │   └── env.ts              # Validated EXPO_PUBLIC_* access (see frontend-patterns)
 │   └── types/                  # App-local cross-file types
