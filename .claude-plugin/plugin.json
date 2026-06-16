@@ -1,7 +1,7 @@
 {
   "name": "rn-ways-of-working",
   "description": "React Native (Expo) engineering standards — gates, skills, agents, hooks",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "author": {
     "name": "Stuart Collinson"
   },

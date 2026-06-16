@@ -57,6 +57,18 @@ src/
             └── use<Domain><SubVerb>.ts
 ```
 
+## 0a. What's set up ONCE vs. what repeats
+
+Most of this gate is the **per-domain shape that repeats**. A small **foundation is wired a single time** when the app is stood up, then left alone:
+
+- `lib/queryClient.ts` — `createAppQueryClient()` global defaults (§2)
+- the root `QueryClientProvider` mount + the RN `focusManager` / `onlineManager` wiring (§2–§3)
+- `lib/api/client.ts` — the envelope-unwrapping, auth-attaching HTTP client (§4)
+- `lib/prefetch.ts` — the sign-in prefetch registry (§11)
+- `lib/time.ts` — the `seconds()` / `minutes()` duration helpers (§5b)
+
+Everything else — `lib/api/<domain>.ts`, `hooks/<domain>/<domain>.cache.ts`, the `use*` hooks, `prefetch<Domain>Queries.ts` — is **per domain** and is copy-paste-and-rename. If you find yourself editing a foundation file to add a domain, stop: the shape has drifted.
+
 ## 1. Server state lives in TanStack Query
 
 - Anything that comes from the API or Supabase is **server state** and lives in the TanStack cache by default. Stop hand-rolling `useState` + `useEffect` + `fetch` for server reads.
