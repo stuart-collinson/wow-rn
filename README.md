@@ -19,7 +19,8 @@ When I start a Claude Code session in a repo that has this plugin enabled, a `Se
 |---|---|
 | `coding-standards.md` | Universal TS style — `type` not `interface`, arrow functions, guard clauses, no `any`, immutability, naming, near-zero comments, Zod validation |
 | `project-structure.md` | The pnpm monorepo (`apps/mobile`, `apps/api`, `packages/shared`) and the Expo Router app layout |
-| `frontend-patterns.md` | RN + Expo Router, gluestack + NativeWind styling, navigation & auth gate, Zustand / RHF / TanStack Query, lists, performance, a11y |
+| `frontend-patterns.md` | RN + Expo Router, gluestack + NativeWind styling, navigation & auth gate, Zustand / RHF, lists, performance, a11y |
+| `tanstack-query.md` | The data layer — `lib/api/` ↔ `hooks/<domain>/` split, the shared API client, query keys, caching, `queryOptions`, mutations & invalidation, polling, infinite-list pagination, prefetch |
 | `backend-patterns.md` | Node/Express + Supabase, the four-layer split (routes → controller → service → repository), response envelope, auth |
 | `database-standards.md` | Supabase migrations (idempotent, append-only), RLS, schema conventions, indexes |
 | `security-standards.md` | Mobile threat model — no secrets in the bundle, SecureStore, server-side authz, deep-link validation |
