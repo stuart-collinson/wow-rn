@@ -48,11 +48,20 @@ apps/mobile/
 ├── src/
 │   ├── components/             # UI components (each in its own folder)
 │   │   └── ui/                 # gluestack-ui copy-in primitives (kebab-case, owned by the CLI)
-│   ├── hooks/                  # Generic UI hooks only (useDebounce.ts) — data hooks live with their domain
+│   ├── hooks/                  # Generic UI hooks flat (useDebounce.ts); per-domain TanStack folders below
+│   │   ├── useDebounce.ts      # cross-cutting hooks stay flat
+│   │   └── workouts/           # a TanStack domain's React-Query layer (see tanstack-query)
+│   │       ├── workouts.cache.ts        # query keys + stale times + queryOptions factories
+│   │       ├── useWorkouts.ts           # one query hook per file (useWorkout.ts, …)
+│   │       ├── useCreateWorkout.ts      # one mutation hook per file
+│   │       └── prefetchWorkoutQueries.ts # warms the domain on sign-in
 │   ├── stores/                 # Zustand stores (useSessionStore.ts)
 │   ├── providers/              # React Context providers (cross-cutting client state)
 │   ├── lib/                    # Non-React utilities + integrations
-│   │   ├── api/                # One module per domain: fetchers + query keys + cache timing + query/mutation hooks (see frontend-patterns)
+│   │   ├── api/                # Network layer — client.ts (envelope unwrap + auth) + one fetcher file per domain (see tanstack-query)
+│   │   ├── queryClient.ts      # createAppQueryClient() — global TanStack defaults (see tanstack-query)
+│   │   ├── prefetch.ts         # prefetchInitialData() — the sign-in prefetch registry
+│   │   ├── time.ts             # seconds() / minutes() duration helpers for stale times
 │   │   ├── supabase.ts         # Supabase client (storage adapter, auth config)
 │   │   └── env.ts              # Validated EXPO_PUBLIC_* access (see frontend-patterns)
 │   └── types/                  # App-local cross-file types
@@ -87,10 +96,12 @@ One exception: **`components/ui/`** holds gluestack-ui's copy-in primitives flat
 ```
 app/(tabs)/workouts/[id].tsx     # routes — lower-case, Expo Router conventions
 components/WorkoutCard/WorkoutCard.tsx   # PascalCase folder + file for components
-hooks/useAuth.ts                 # camelCase, 'use' prefix
+hooks/useAuth.ts                 # camelCase, 'use' prefix — cross-cutting hooks, flat
+hooks/workouts/workouts.cache.ts # per-domain query keys + queryOptions (see tanstack-query)
+hooks/workouts/useWorkouts.ts    # per-domain query/mutation hook — one per file
 stores/useSessionStore.ts        # camelCase, 'use' prefix, 'Store' suffix
 lib/formatDuration.ts            # camelCase for utilities
-lib/api/workouts.ts              # camelCase, plural resource name
+lib/api/workouts.ts              # network fetchers — camelCase, plural resource, no Api suffix
 types/workout.types.ts           # camelCase with .types suffix
 ```
 

@@ -118,7 +118,7 @@ Pick the smallest tool that fits.
 
 | State type | Tool |
 |---|---|
-| Server state / cache | TanStack Query |
+| Server state / cache | TanStack Query (owned by the `tanstack-query` gate) |
 | Form state | React Hook Form (single instance, even across wizard steps) |
 | Shared / cross-component / persistent client state | Zustand |
 | App-lifetime cross-cutting (session, theme) | React Context |
@@ -127,122 +127,12 @@ Pick the smallest tool that fits.
 
 ### Server state — TanStack Query
 
-All data from the API or Supabase is server state and lives in the TanStack Query cache. **Never mirror query data into Zustand** — that creates two sources of truth that drift. We use TanStack Query (not tRPC): the API is a separate REST service, and shared types come from `packages/shared`, so tRPC's end-to-end-type-safety benefit doesn't apply.
+All data from the API or Supabase is server state and lives in the TanStack Query cache. **The full data layer — the `lib/api/` ↔ `hooks/<domain>/` split, the shared API client, query keys, caching, `queryOptions`, hooks, mutations, invalidation, polling, pagination, and prefetch — is owned by the `tanstack-query` gate. Read it before fetching anything.** The headline rule: every domain is laid out identically — raw HTTP in `lib/api/<domain>.ts`, the React-Query layer (`<domain>.cache.ts` + `use*` hooks + `prefetch<Domain>Queries.ts`) in `hooks/<domain>/`.
 
-#### One module per domain
+Two rules survive here unchanged:
 
-Each domain gets **one file** — `lib/api/<domain>.ts` — that owns everything about how that resource is fetched and cached: the fetchers, the query-key factory, the cache timing (`staleTime` / `gcTime` / refetch behaviour), and the query/mutation hooks. Reading `customers.ts` tells you the full story of customer data — you never hunt across a separate keys file, config file, and hooks file. The glue that makes this colocation type-safe is TanStack's **`queryOptions`** helper: define the key + fetcher + timing once, and `useQuery`, `prefetchQuery`, `ensureQueryData`, and `setQueryData` all consume the same object.
-
-```ts
-// lib/api/customers.ts — the whole customer domain in one file
-import { queryOptions, useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { apiClient } from '@/lib/api/client'
-import type { Customer, CreateCustomerInput } from '@acme/shared'
-
-const MINUTE = 60_000
-
-// 1. Fetchers — thin typed wrappers over the API client
-const fetchCustomers = () => apiClient.get<Customer[]>('/customers')
-const fetchCustomer = (id: string) => apiClient.get<Customer>(`/customers/${id}`)
-
-// 2. Query keys — one factory, structured general → specific so invalidation can target a subtree
-export const customerKeys = {
-  all: ['customers'] as const,
-  lists: () => [...customerKeys.all, 'list'] as const,
-  detail: (id: string) => [...customerKeys.all, 'detail', id] as const,
-}
-
-// 3. Query options — key + fetcher + cache timing colocated, per query.
-//    Customers change rarely, so they stay fresh for 5 min and survive 30 min in cache.
-export const customerQueries = {
-  list: () =>
-    queryOptions({
-      queryKey: customerKeys.lists(),
-      queryFn: fetchCustomers,
-      staleTime: 5 * MINUTE,
-      gcTime: 30 * MINUTE,
-    }),
-  detail: (id: string) =>
-    queryOptions({
-      queryKey: customerKeys.detail(id),
-      queryFn: () => fetchCustomer(id),
-      staleTime: 5 * MINUTE,
-    }),
-}
-
-// 4. Hooks — screens call these; they read like nothing more than the data they need
-export const useCustomers = () => useQuery(customerQueries.list())
-export const useCustomer = (id: string) => useQuery(customerQueries.detail(id))
-
-export const useCreateCustomer = () => {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (input: CreateCustomerInput) => apiClient.post<Customer>('/customers', input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: customerKeys.all }),
-  })
-}
-```
-
-The data-fetching hooks live in the domain module, **not** in `hooks/` — `hooks/` is for generic UI hooks (`useDebounce`, `useToggle`). A query hook belongs next to its keys and timing.
-
-#### Cache timing — global default, per-domain override
-
-Set a sensible **global default** once on the `QueryClient`, then override per query in each domain file. TanStack v5's defaults (`staleTime: 0`, `gcTime: 5 min`, `retry: 3`, refetch on mount / focus / reconnect) refetch aggressively — fine on web, wasteful of battery and mobile data. A small global `staleTime` stops refetch storms when navigating between screens; each domain then tunes from there.
-
-```ts
-// lib/api/queryClient.ts
-export const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,      // 30s — most screens don't need fresher than this
-      gcTime: 5 * 60_000,     // v5 renamed cacheTime → gcTime
-      retry: 2,
-      refetchOnWindowFocus: true,   // wired to AppState below for RN
-    },
-  },
-})
-```
-
-Tune `staleTime` to how fast the data actually changes — long for reference data (`competitions`: an hour+), short or `0` for live data (`fixtures`/`standings` during a match). Decide it **in the domain file**, where the refetch behaviour reads alongside the query it governs.
-
-#### Invalidate vs. write the cache
-
-- **`invalidateQueries`** — the default after a mutation. Marks matching queries stale and refetches; the server stays the source of truth.
-- **`setQueryData`** — write the cache directly when you already hold the authoritative new value (a mutation that returns the updated row, or an optimistic update). Skips a round trip. Don't hand-roll cache data you only *think* is correct — invalidate instead.
-
-#### Prefetching on login
-
-Warm the cache for the screens the user lands on right after sign-in, so the first render reads from cache instead of showing a spinner. Because the prefetch reuses the same `queryOptions`, the eventual `useQuery` on the screen hits a populated, correctly-keyed entry — no duplicate fetch.
-
-```ts
-// After a successful sign-in, before navigating into (tabs)
-const prefetchInitialData = async () => {
-  await Promise.all([
-    queryClient.prefetchQuery(competitionQueries.list()),
-    queryClient.prefetchQuery(customerQueries.list()),
-    queryClient.prefetchQuery(standingsQueries.current()),
-  ])
-}
-```
-
-`prefetchQuery` fetches-and-caches and never throws (a failed warm-up just means the screen fetches normally). Use **`ensureQueryData`** instead when you need the value back at the call site (it returns cached data or fetches). Fire prefetches in parallel with `Promise.all`; don't block navigation on slow ones — `await` only what the very first screen needs.
-
-#### React Native wiring
-
-Two bits of wiring at the app root, done once, so focus-refetch and offline-pause work on a device:
-
-```tsx
-import { focusManager, onlineManager } from '@tanstack/react-query'
-import { AppState, Platform } from 'react-native'
-import NetInfo from '@react-native-community/netinfo'
-
-// Refetch stale queries when the app returns to the foreground
-AppState.addEventListener('change', (status) => {
-  if (Platform.OS !== 'web') focusManager.setFocused(status === 'active')
-})
-// Pause queries/mutations when offline, resume on reconnect
-onlineManager.setEventListener((setOnline) => NetInfo.addEventListener((state) => setOnline(!!state.isConnected)))
-```
+- **Never call `fetch` from a component.** Every network call goes through a typed fetcher in `lib/api/<domain>.ts`, layered on the shared `lib/api/client.ts`.
+- **Server reads go through a `use*` hook backed by the cache** — not `useState` + `useEffect`. **Never mirror query data into Zustand**; that creates two sources of truth that drift. We use TanStack Query (not tRPC): the API is a separate REST service and shared types come from `packages/shared`, so tRPC's end-to-end-type-safety benefit doesn't apply.
 
 ### Zustand for shared client state
 
@@ -305,27 +195,7 @@ Every screen that loads data handles three states explicitly: **loading, empty, 
 
 ## Optimistic UI
 
-For mutations where the post-mutation state is predictable (toggling a favourite, renaming), use TanStack Query's optimistic pattern — it owns the cache, so the optimistic value and the eventual server value live in one place.
-
-```tsx
-const toggleFavourite = useMutation({
-  mutationFn: api.workouts.toggleFavourite,
-  onMutate: async ({ id, favourited }) => {
-    await queryClient.cancelQueries({ queryKey: ['workouts'] })
-    const previous = queryClient.getQueryData<Workout[]>(['workouts'])
-    queryClient.setQueryData<Workout[]>(['workouts'], (old) =>
-      old?.map((workout) => (workout.id === id ? { ...workout, favourited } : workout)),
-    )
-    return { previous }
-  },
-  onError: (_err, _input, context) => {
-    if (context?.previous) queryClient.setQueryData(['workouts'], context.previous)
-  },
-  onSettled: () => queryClient.invalidateQueries({ queryKey: ['workouts'] }),
-})
-```
-
-Don't optimistically update destructive mutations (delete, archive) where a revert would jar, or where the server result isn't predictable — show a normal pending state there.
+Optimistic mutations (toggling a favourite, renaming) are owned by the `tanstack-query` gate — it holds the cancel / snapshot / rollback shape, since TanStack owns the cache. Don't optimistically update destructive mutations (delete, archive) where a revert would jar, or anything whose server result you can't predict — show a normal pending state (`mutation.isPending`) there.
 
 ## Lists — `FlatList`, not `.map`
 
