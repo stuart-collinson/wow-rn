@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/inject-gates.mjs\"",
-            "statusMessage": "Loading React Native engineering standards"
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/check-gates.mjs\"",
+            "statusMessage": "Checking the React Native engineering standards are loaded"
           }
         ]
       }

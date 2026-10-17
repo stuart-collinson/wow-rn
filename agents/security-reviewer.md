@@ -11,7 +11,7 @@ You are a security specialist for React Native (Expo) apps backed by a Node API 
 
 ## First step — always
 
-The `security-standards` gate is injected into the session at startup; it holds the full pattern reference, severity table, and checklists. If it isn't in context, read `gates/security-standards.md` from the plugin. Use it to guide the review.
+The `security-standards` gate is loaded into the session through the `GATES.md` import in the repo's `CLAUDE.md`; it holds the full pattern reference, severity table, and checklists. If it isn't in context, read `gates/security-standards.md` from the plugin. Use it to guide the review.
 
 ## Review workflow
 

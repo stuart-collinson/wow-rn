@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Implement Code
 
-You are about to implement code in a React Native (Expo) project. The engineering standards are injected into this session at startup by the `rn-ways-of-working` plugin — they are already in your context. Apply them; do not write a line that violates them.
+You are about to implement code in a React Native (Expo) project. The engineering standards are loaded in full through the `GATES.md` import in this repo's `CLAUDE.md` — apply them; do not write a line that violates them. If the `SessionStart` hook warned that the gates are not loaded, Read every gate from the gate root it names before continuing.
 
 ## Step 1 — Understand the request
 
