@@ -168,83 +168,15 @@ For `ILIKE '%term%'` substring search, use a GIN index with `gin_trgm_ops` (`CRE
 
 ## The Skeleton Schema
 
-Every app starts with these five migrations (`/new-app` copies them). They are the reference for every rule above.
+Every app starts with five migrations, written into `supabase/migrations/` by `/new-app`. They are the worked example of every rule above, and the tables other gates rely on.
 
-```sql
--- 1) the shared touch trigger
-CREATE OR REPLACE FUNCTION public.set_updated_at()
-RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END $$;
-
--- 2) profile — one row per auth user, created by trigger, never by the app
-CREATE TABLE IF NOT EXISTS profile (
-  id           uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  display_name text,
-  created_at   timestamptz NOT NULL DEFAULT now(),
-  updated_at   timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE profile ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "users read own profile" ON profile;
-CREATE POLICY "users read own profile" ON profile FOR SELECT TO authenticated USING ((SELECT auth.uid()) = id);
-DROP POLICY IF EXISTS "users update own profile" ON profile;
-CREATE POLICY "users update own profile" ON profile FOR UPDATE TO authenticated
-  USING ((SELECT auth.uid()) = id) WITH CHECK ((SELECT auth.uid()) = id);
-DROP TRIGGER IF EXISTS profile_set_updated_at ON profile;
-CREATE TRIGGER profile_set_updated_at BEFORE UPDATE ON profile FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
-BEGIN
-  INSERT INTO public.profile (id, display_name)
-  VALUES (NEW.id, NEW.raw_user_meta_data ->> 'full_name')
-  ON CONFLICT (id) DO NOTHING;
-  RETURN NEW;
-END $$;
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created AFTER INSERT ON auth.users FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
-
--- 3) app_config — remote switches, read by everyone, written only in the dashboard table editor
-CREATE TABLE IF NOT EXISTS app_config (
-  key        text PRIMARY KEY,
-  value      jsonb NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE app_config ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "anyone can read app config" ON app_config;
-CREATE POLICY "anyone can read app config" ON app_config FOR SELECT TO anon, authenticated USING (true);
-INSERT INTO app_config (key, value)
-VALUES ('ads_enabled', 'false'::jsonb), ('min_supported_version', '"1.0.0"'::jsonb)
-ON CONFLICT (key) DO NOTHING;
-
--- 4) delete_my_account — the in-app deletion button; the cascade removes every user-owned row
-CREATE OR REPLACE FUNCTION public.delete_my_account()
-RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path = '' AS $$
-  DELETE FROM auth.users WHERE id = auth.uid();
-$$;
-REVOKE EXECUTE ON FUNCTION public.delete_my_account() FROM public, anon;
-GRANT EXECUTE ON FUNCTION public.delete_my_account() TO authenticated;
-
--- 5) device_push_token — one row per device, owned by its user
-CREATE TABLE IF NOT EXISTS device_push_token (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE,
-  token      text NOT NULL UNIQUE,
-  platform   text NOT NULL CHECK (platform IN ('ios', 'android')),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE device_push_token ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "users manage own push tokens" ON device_push_token;
-CREATE POLICY "users manage own push tokens" ON device_push_token FOR ALL TO authenticated
-  USING ((SELECT auth.uid()) = user_id) WITH CHECK ((SELECT auth.uid()) = user_id);
-CREATE INDEX IF NOT EXISTS device_push_token_user_id_idx ON device_push_token(user_id);
-DROP TRIGGER IF EXISTS device_push_token_set_updated_at ON device_push_token;
-CREATE TRIGGER device_push_token_set_updated_at BEFORE UPDATE ON device_push_token
-  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-```
+| Migration | Holds |
+|---|---|
+| `set_updated_at` | the shared touch trigger function (`plpgsql`, `SET search_path = ''`), applied to every table with `updated_at` |
+| `profile` | one row per auth user: `id` references `auth.users` with cascade, `display_name`; RLS read/update own; `handle_new_user()` (`SECURITY DEFINER`) inserts it from an `AFTER INSERT ON auth.users` trigger with `ON CONFLICT DO NOTHING` — the app never creates profiles |
+| `app_config` | `key text PRIMARY KEY, value jsonb NOT NULL, updated_at`; RLS `SELECT TO anon, authenticated USING (true)`, **no write policies**; seeds `ads_enabled = false` and `min_supported_version = "1.0.0"` with `ON CONFLICT (key) DO NOTHING` |
+| `delete_my_account` | `SECURITY DEFINER` SQL function that runs `DELETE FROM auth.users WHERE id = auth.uid()`; `REVOKE EXECUTE … FROM public, anon`, `GRANT EXECUTE … TO authenticated`; the cascades remove every user-owned row |
+| `device_push_token` | `user_id DEFAULT auth.uid()` with cascade, `token text UNIQUE`, `platform CHECK (platform IN ('ios', 'android'))`; RLS `FOR ALL TO authenticated` on own rows; index on `user_id`; touch trigger |
 
 ## Don'ts
 
