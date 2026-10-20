@@ -233,7 +233,7 @@ Every screen that loads data handles three states explicitly: **loading, empty, 
 
 ## Optimistic UI
 
-Optimistic mutations (toggling a favourite, renaming) are owned by the `tanstack-query` gate — it holds the cancel / snapshot / rollback shape, since TanStack owns the cache. Don't optimistically update destructive mutations (delete, archive) where a revert would jar, or anything whose server result you can't predict — show a normal pending state (`mutation.isPending`) there.
+Optimistic mutations are owned by the `tanstack-query` gate (cancel / snapshot / rollback). Never optimistic for destructive mutations or unpredictable server results — show `mutation.isPending` there.
 
 ## Lists — `FlatList`, not `.map`
 
@@ -248,14 +248,8 @@ Optimise when you measure a problem. The React Compiler is on, so don't hand-wri
 Every app ships with `ios.supportsTablet: true`, so every screen must earn its width. Uniwind's responsive variants are mobile-first and keyed to device width: unprefixed classes apply everywhere, `md:` (768pt and up) is the tablet breakpoint, `lg:` (1024pt) landscape tablets. A list-detail screen goes side by side at `md:`, a form caps its width, a card grid goes from one column to two. Never a hard-coded width check in a component — if a layout needs the number, it comes from `src/constants/breakpoints.ts`.
 
 ```tsx
-// PASS — one column on a phone, two on an iPad
-<View className="flex-row flex-wrap">
-  <View className="w-full p-2 md:w-1/2">
-    <WorkoutCard workout={workout} />
-  </View>
-</View>
-
-// PASS — a form that doesn't stretch across a 13-inch screen
+// PASS — one column on a phone, two on an iPad; a form that doesn't stretch across a 13-inch screen
+<View className="w-full p-2 md:w-1/2"><WorkoutCard workout={workout} /></View>
 <View className="w-full self-center md:max-w-xl">…</View>
 ```
 
