@@ -19,14 +19,7 @@ It assumes the stack in `project-structure` (one Expo app talking to its own Sup
 
 **The dividing line, stated once and applied everywhere: is it React / React-Query (hooks, query keys, `queryOptions`, `prefetchQuery`) → `hooks/<domain>/`. Is it a Supabase call → `lib/api/<domain>.ts`.** A file with no React and no TanStack import never belongs under `hooks/`, and the Supabase client is never imported above `lib/`.
 
-Each of these is a **gate failure**:
-
-- a `supabase.from(...)` call living under `hooks/`, in a component, or in a route file;
-- a domain with no `<domain>.cache.ts`;
-- a query key or `staleTime` hand-built inside a hook instead of imported from the cache file;
-- a network file named `<domain>Api.ts` (the `api/` folder already says "api") instead of `lib/api/<domain>.ts`;
-- an `index.ts` barrel anywhere in the domain folder;
-- a server read done with `useState` + `useEffect` instead of a cached `use*` hook.
+Each of these is a **gate failure**: a `supabase.from(...)` call under `hooks/`, in a component or a route file; a domain with no `<domain>.cache.ts`; a query key or `staleTime` hand-built inside a hook; a network file named `<domain>Api.ts` instead of `lib/api/<domain>.ts`; an `index.ts` barrel anywhere in the domain folder; a server read done with `useState` + `useEffect` instead of a cached `use*` hook.
 
 ## 0. File & folder map (the canonical layout)
 
@@ -241,9 +234,7 @@ export const workoutKeys = {
 }
 ```
 
-- The domain root string is **unique per domain**. **Filters/params go *in* the key** so each combination caches independently.
-- **No user id in the key.** RLS scopes the data to the signed-in user and the cache is cleared on sign-out (§2a), so the id adds nothing.
-- **Everything imports the factory** — hooks, prefetch, and cache writes. A hand-typed array drifts from the stored key and the invalidation silently misses.
+The root string is unique per domain; filters go *in* the key so each combination caches independently; no user id in the key (RLS scopes the data and sign-out clears the cache, §2a); and everything imports the factory — a hand-typed array drifts from the stored key and the invalidation silently misses.
 
 ### (b) Per-query stale times via `lib/time.ts`
 
@@ -284,11 +275,7 @@ export const workoutDetailQuery = (id: string) =>
 
 ## 6. Caching rules — tune to how fast the data changes
 
-`staleTime` is decided **in the domain's cache file**, where the timing reads alongside the query it governs; `gcTime` stays at the global 24 hours unless a query's data is large and rarely revisited.
-
-- **Reference / slow-moving data** (a catalogue, a profile, `app_config`) — long `staleTime` (minutes to an hour+).
-- **Live / fast-moving data** (a feed during activity, anything tied to an in-progress process) — short `staleTime` or `0`, and consider polling (§9) or Realtime (§9a).
-- **The global floor (§2) is a backstop, not a target**; the per-query value is the real decision.
+`staleTime` is decided **in the domain's cache file**, alongside the query it governs; `gcTime` stays at the global 24 hours unless a query's data is large and rarely revisited. Slow-moving data (a catalogue, a profile, `app_config`) gets minutes to an hour; live data (a feed during activity, an in-progress process) gets seconds or `0` plus polling (§9) or Realtime (§9a). The global floor (§2) is a backstop, not a target.
 
 ## 7. Hooks — thin React-Query bindings
 
@@ -357,21 +344,17 @@ Long lists paginate by **keyset** (never offset): the fetcher orders by `created
 Warm the cache for the screens the user lands on right after they sign in. Because the prefetch reuses the same `queryOptions`/`infiniteQueryOptions` factory, the eventual `useQuery` on the screen hits a populated, correctly-keyed entry — no duplicate fetch.
 
 ```ts
-// hooks/workouts/prefetchWorkoutQueries.ts: queryClient.prefetchInfiniteQuery(workoutListQuery({ pageSize: 20 })) — filters match the screen's defaults
-// lib/prefetch.ts — one registry, walked once after sign-in; adding a domain is one line
-const TASKS = [
-  { domain: 'workouts', run: prefetchWorkoutQueries },
-  { domain: 'appConfig', run: prefetchAppConfigQueries },
-]
+// hooks/workouts/prefetchWorkoutQueries.ts — the screen's own defaults, or you warm a key it never reads
+export const prefetchWorkoutQueries = (queryClient: QueryClient) => queryClient.prefetchInfiniteQuery(workoutListQuery({ pageSize: 20 }))
 
+// lib/prefetch.ts — one registry, walked once after sign-in; adding a domain is one line
+const TASKS = [{ domain: 'workouts', run: prefetchWorkoutQueries }, { domain: 'appConfig', run: prefetchAppConfigQueries }]
 export const prefetchInitialData = (queryClient: QueryClient): void => {
-  for (const task of TASKS) {
-    void task.run(queryClient).catch((error) => console.error(`[prefetch] ${task.domain} failed`, error))
-  }
+  for (const task of TASKS) void task.run(queryClient).catch((error) => console.error(`[prefetch] ${task.domain} failed`, error))
 }
 ```
 
-Trigger it **once**, after a successful sign-in and before navigating into the authed stack — not from a per-screen effect. Each task is fire-and-forget with its own `.catch` so one domain's failure can't sink the others. Prefetch is opportunistic: silent on slow, silent on failure.
+Trigger it **once**, after a successful sign-in — not from a per-screen effect. Each task is fire-and-forget with its own `.catch` so one domain's failure can't sink the others; prefetch is opportunistic, silent on slow and on failure.
 
 ## 12. The `appConfig` domain — remote config is just another query
 
@@ -410,8 +393,8 @@ Consumers read `config?.ads_enabled === true` — a missing row, a failed fetch,
 
 ## Adopt on a new domain — checklist
 
-1. **Types + mapper →** `types/<domain>.types.ts`: `<Domain>Row` from the generated `Database` type, `<DOMAIN>_COLUMNS`, the `camelCase` domain type, `to<Domain>(row)`.
-2. **Network layer →** `lib/api/<domain>.ts`: one query per operation on `@/lib/supabase`, explicit columns, `unwrap`/`assertOk`, the mapper. `fetch<Domain>[List]` for reads, `<verb><Domain>Request` for writes. No `user_id` filters, no `try`/`catch`, no comments.
-3. **Cache file →** `hooks/<domain>/<domain>.cache.ts`: key factory, local `STALE_TIMES`, a `queryOptions`/`infiniteQueryOptions` factory per read query.
-4. **Hooks →** `hooks/<domain>/use<Domain><Verb>.ts`, one export per file, spreading the factory, `enabled` guards.
-5. **Mutations →** invalidate the narrowest prefix, or `setQueryData` when the response is authoritative; optimistic only when predictable. **Pagination →** keyset in the fetcher + `useInfiniteQuery`. **Prefetch →** `prefetch<Domain>Queries.ts` + one line in `lib/prefetch.ts`. **No barrel.** Polling and Realtime only when the data needs them.
+1. `types/<domain>.types.ts`: `<Domain>Row`, `<DOMAIN>_COLUMNS`, the `camelCase` type, `to<Domain>(row)`.
+2. `lib/api/<domain>.ts`: one query per operation, explicit columns, `unwrap`/`assertOk`, the mapper; `fetch<Domain>[List]` reads, `<verb><Domain>Request` writes; no `user_id` filters, no `try`/`catch`, no comments.
+3. `hooks/<domain>/<domain>.cache.ts`: key factory, `STALE_TIMES`, a `queryOptions`/`infiniteQueryOptions` factory per read.
+4. `hooks/<domain>/use<Domain><Verb>.ts`: one export per file, spreading the factory, `enabled` guards.
+5. Mutations invalidate the narrowest prefix (or `setQueryData` with an authoritative value); keyset pagination + `useInfiniteQuery`; `prefetch<Domain>Queries.ts` + one line in `lib/prefetch.ts`; no barrel; polling and Realtime only when the data needs them.
