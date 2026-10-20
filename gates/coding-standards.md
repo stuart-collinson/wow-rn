@@ -1,6 +1,6 @@
 # Coding Standards & Best Practices
 
-Universal coding standards for React Native (Expo) + TypeScript projects. The principles are language-agnostic; examples are TypeScript because that's the stack. Anything tied to React Native, Expo Router, or a specific layer lives in `frontend-patterns.md`, `backend-patterns.md`, or `database-standards.md`, not here.
+Universal coding standards for React Native (Expo) + TypeScript projects. The principles are language-agnostic; examples are TypeScript because that's the stack. Anything tied to React Native, Expo Router, or a specific layer lives in `frontend-patterns.md`, `edge-functions.md`, or `database-standards.md`, not here.
 
 ## Core Principles
 
@@ -128,7 +128,7 @@ function fetchData(url: string) { }
 export default function Screen() { }  // use an arrow function assigned to a const
 ```
 
-Exception: methods inside a `class` use method syntax (relevant on the backend; classes are rare in the app).
+Exception: methods inside a `class` use method syntax (classes are rare; `DataError` in `lib/api/` is the one you will meet).
 
 ## Control Flow — guard clauses
 
