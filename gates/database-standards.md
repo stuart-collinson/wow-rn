@@ -173,9 +173,9 @@ Every app's first five migrations are this skeleton. They are the worked example
 |---|---|
 | `set_updated_at` | the shared touch trigger function (`plpgsql`, `SET search_path = ''`), applied to every table with `updated_at` |
 | `profile` | one row per auth user: `id` references `auth.users` with cascade, `display_name`; RLS read/update own; `handle_new_user()` (`SECURITY DEFINER`) inserts it from an `AFTER INSERT ON auth.users` trigger with `ON CONFLICT DO NOTHING` — the app never creates profiles |
-| `app_config` | `key text PRIMARY KEY, value jsonb NOT NULL, updated_at`; RLS `SELECT TO anon, authenticated USING (true)`, **no write policies**; seeds `ads_enabled = false` and `min_supported_version = "1.0.0"` with `ON CONFLICT (key) DO NOTHING` |
-| `delete_my_account` | `SECURITY DEFINER` SQL function that runs `DELETE FROM auth.users WHERE id = auth.uid()`; `REVOKE EXECUTE … FROM public, anon`, `GRANT EXECUTE … TO authenticated`; the cascades remove every user-owned row |
-| `device_push_token` | `user_id DEFAULT auth.uid()` with cascade, `token text UNIQUE`, `platform CHECK (platform IN ('ios', 'android'))`; RLS `FOR ALL TO authenticated` on own rows; index on `user_id`; touch trigger |
+| `app_config` | `key text PRIMARY KEY, value jsonb NOT NULL, updated_at` with the touch trigger; RLS `SELECT TO anon, authenticated USING (true)`, **no write policies**; seeds `ads_enabled = false` and `min_supported_version = "1.0.0"` with `ON CONFLICT (key) DO NOTHING` |
+| `delete_my_account` | `SECURITY DEFINER` SQL function that runs `DELETE FROM auth.users WHERE id = auth.uid()`; `REVOKE EXECUTE … FROM public, anon`, `GRANT EXECUTE … TO authenticated`; the cascades remove every user-owned row. Storage has no cascade from `auth.users`: an app with uploads adds `DELETE FROM storage.objects WHERE owner_id = (SELECT auth.uid())::text` before it |
+| `device_push_token` | `user_id DEFAULT auth.uid()` with cascade, `token text UNIQUE`, `platform CHECK (platform IN ('ios', 'android'))`; RLS `FOR ALL TO authenticated` on own rows; index on `user_id`; touch trigger; `register_push_token(p_token, p_platform)` (`SECURITY DEFINER`, authenticated only) upserts the row and moves the token to the caller — a push token identifies the device, so the last signer-in owns it |
 
 ## Don'ts
 

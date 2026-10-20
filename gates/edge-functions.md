@@ -72,6 +72,7 @@ serve(async (request) => {
 - **Identity comes from the verified token** (`auth.userClaims.id`), never from the request body or query string.
 - **`createContextClient` is the default** — it carries the caller's JWT, so RLS still applies inside the function.
 - **`createAdminClient()` bypasses RLS.** Use it only in a job that genuinely spans users or runs with no caller (a webhook, a scheduled send), and say why in a one-line comment at the call site. A function that *needs* it to serve an end user is a missing RLS policy, not a reason to bypass.
+- **A job with no user** (a `pg_cron` schedule or a trigger calling through `pg_net`) authenticates with the project's secret key: `verifyAuth(request, { auth: 'secret' })` checks the `apikey` header against `SUPABASE_SECRET_KEYS`. The SQL side reads that key from Supabase Vault (`vault.decrypted_secrets`), never from a table or a migration.
 
 ## Secrets
 
@@ -112,7 +113,7 @@ serve(async (request) => {
 
 ## The push sender
 
-`send-push` reads `device_push_token` with the admin client for the users it is told to reach, sends through `npm:expo-server-sdk` in `chunkPushNotifications` batches, and deletes tokens whose receipt says `DeviceNotRegistered`. It is called by `pg_net` from a trigger or `pg_cron`, or by an authenticated admin — never by `anon`.
+`send-push` reads `device_push_token` with the admin client for the users it is told to reach, sends through `npm:expo-server-sdk` in `chunkPushNotifications` batches, and deletes tokens whose receipt says `DeviceNotRegistered`. It is called by `pg_net` from a trigger or `pg_cron` with the secret key as `apikey` (verified with `auth: 'secret'`), or by an authenticated admin — never by `anon`.
 
 ## Local run, deploy, logs
 

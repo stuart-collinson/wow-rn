@@ -17,7 +17,7 @@ If you stumbled on this, feel free to poke around, but the opinions in here are 
 | GitHub | Free | Always. Private app repos, CI, and the public `app-sites` repo for store pages. |
 | Expo | Free | Always. `eas submit`, credentials, EAS Update, the Supabase integration command. |
 | Supabase | Free for two apps | Always. One project per app. App three means Pro ($25/month plus $10/month per extra project) or a second account or organisation. |
-| Google Cloud project | Free | Always. OAuth client IDs for Google sign-in, under your existing Google account. |
+| Google Cloud project | Free | Always. OAuth client IDs for Google sign-in: web, iOS, and an Android client carrying the keystore SHA-1 from `eas credentials`. Under your existing Google account. |
 | RevenueCat | Free to $2.5K/month revenue, then 1% | Only when an app sells something. Apple's paid-apps agreement and bank details too. |
 | Google AdMob | Free | Only when an app shows ads. |
 | Firebase project | Free | Only when an app sends push to Android (FCM credentials for Expo's push service). |
@@ -88,7 +88,7 @@ The scaffolding recipe is a local skill, `/new-app`, kept in the first app repo 
 
 ## First real app checklist
 
-Things only a human with live accounts can finish, once per app: Google and Apple sign-in against the hosted project (Apple needs a physical device), the Google `iosUrlScheme`, push credentials via `eas credentials`, RevenueCat sandbox purchases, the three `app-sites` URLs entered in App Store Connect and the Play Console, and Google's closed test.
+Things only a human with live accounts can finish, once per app: Google and Apple sign-in against the hosted project (Apple needs a physical device), the Google `iosUrlScheme` and the Android client's SHA-1, account deletion tested end to end from the settings screen, push credentials via `eas credentials`, RevenueCat sandbox purchases, the three `app-sites` URLs entered in App Store Connect and the Play Console, and Google's closed test.
 
 ## Updating the gates
 

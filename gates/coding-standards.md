@@ -97,7 +97,7 @@ const handle = (input: unknown): Result => {
 }
 ```
 
-`unknown` forces narrowing before use — that's the point. `any` switches type-checking off and is never the answer. Run with `strict: true`.
+`unknown` forces narrowing before use — that's the point. `any` switches type-checking off and is never the answer. Run with `strict: true` and `noUncheckedIndexedAccess: true` — `array[i]` is `T | undefined`, narrow before use.
 
 ### Explicit return types — but only when they document something
 

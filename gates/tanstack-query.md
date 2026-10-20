@@ -37,7 +37,7 @@ src/
 │   ├── storage.ts                kvStorage — expo-sqlite/kv-store, shared by the persister and Zustand
 │   ├── queryClient.ts            createAppQueryClient() + queryPersister + persistOptions
 │   └── api/
-│       ├── dataError.ts          DataError + unwrap() / assertOk() — the only place a Supabase error is interpreted
+│       ├── dataError.ts          DataError, NetworkError, unwrap() / assertOk() — the only place a Supabase error is interpreted
 │       └── <domain>.ts           the domain's NETWORK layer (a sub-folder when it spans sub-resources)
 └── hooks/
     └── <domain>/                 the domain's REACT-QUERY layer
@@ -97,7 +97,7 @@ export const createAppQueryClient = () =>
   })
 ```
 
-A `DataError` is PostgREST or RLS telling you the request itself is wrong (a denied row, a missing table, a bad filter); retrying won't fix it. Network failures are everything else and get two retries.
+A `DataError` is PostgREST or RLS telling you the request itself is wrong (a denied row, a missing table, a bad filter); retrying won't fix it. A transport failure, which `supabase-js` hands back as an error with an empty `code`, is thrown as a `NetworkError` and gets two retries.
 
 ### 2a. The persisted cache — online-first, instant on relaunch
 
@@ -118,7 +118,7 @@ return (
 ```
 
 - Reads are instant from cache, then refetched when stale. **Writes need a connection** — there is no offline mutation queue; a failed mutation surfaces to the user (§8).
-- **Sign-out clears everything.** The sign-out hook calls `signOutRequest()` (`lib/api/auth.ts`), then `queryClient.clear()`, then `await queryPersister.removeClient()`, *before* the auth gate flips. Skipping a step shows the next user the previous user's screens.
+- **One sign-out sequence, in this order** (`hooks/useSignOut.ts`): anything that needs the live session first — `deletePushTokenRequest(token)` when push is on, `Purchases.logOut()` when payments are on — then `queryClient.cancelQueries()`, `queryClient.clear()`, `await queryPersister.removeClient()`, and only then `signOutRequest()`. Clearing before signing out means a kill mid-sequence leaves no cache behind; the `SIGNED_OUT` event then flips the auth gate. Skipping a step shows the next user the previous user's screens or notifications.
 
 ## 3. React Native wiring — `focusManager` + `onlineManager`
 
@@ -153,20 +153,30 @@ export class DataError extends Error {
   }
 }
 
+export class NetworkError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NetworkError'
+  }
+}
+
 type Result<T> = { data: T | null; error: PostgrestError | null }
 
+const toError = (error: PostgrestError): Error =>
+  error.code ? new DataError(error.code, error.message, error.details) : new NetworkError(error.message)
+
 export const unwrap = <T>({ data, error }: Result<T>): T => {
-  if (error) throw new DataError(error.code, error.message, error.details)
+  if (error) throw toError(error)
   if (data === null) throw new DataError('NO_DATA', 'Query returned no data')
   return data
 }
 
 export const assertOk = ({ error }: { error: PostgrestError | null }): void => {
-  if (error) throw new DataError(error.code, error.message, error.details)
+  if (error) throw toError(error)
 }
 ```
 
-`unwrap` is for reads and writes that `.select()` a row back; `assertOk` is for writes that return nothing (`delete`, an `update` without `.select()`).
+`unwrap` is for reads and writes that `.select()` a row back; `assertOk` is for writes that return nothing (`delete`, an `update` without `.select()`, an `rpc`). An error with no `code` is the network failing, not PostgREST, so it becomes a `NetworkError` the retry predicate retries.
 
 ### The domain fetchers — `lib/api/<domain>.ts`
 

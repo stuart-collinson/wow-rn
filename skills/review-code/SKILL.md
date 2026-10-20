@@ -66,7 +66,7 @@ If none: _None found._
 | Navigation (Expo Router typed routes, NativeTabs, Stack.Protected auth gate) | | |
 | Edge Functions (portable, caller verified, secrets via getEnv, idempotent webhooks) | | |
 | Migrations idempotent + RLS in same file; types regenerated | | |
-| Monetisation (AdBanner gated by app_config and consent; restore purchases present) | | |
+| Monetisation, when enabled (AdBanner gated by app_config and consent; restore purchases present with payments) | | |
 | Security (publishable key only, session storage rule, deep-link validation, no secrets in logs) | | |
 | No unused code / near-zero comments | | |
 

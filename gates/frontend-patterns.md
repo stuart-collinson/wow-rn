@@ -117,16 +117,16 @@ const TabsLayout = () => (
 export default TabsLayout
 ```
 
-### Auth gate — `Stack.Protected` in the root layout
+### Auth gate — `Stack.Protected` in `AppShell`
 
-The signed-in/signed-out split is enforced declaratively in the root `_layout.tsx` with `Stack.Protected` guards, not with scattered redirects in each screen.
+The signed-in/signed-out split is enforced declaratively with `Stack.Protected` guards, not with scattered redirects in each screen. They live in `components/AppShell/AppShell.tsx`, which the root `_layout.tsx` renders inside the providers, because the guards read hooks that need those providers.
 
 ```tsx
-// app/_layout.tsx
+// src/components/AppShell/AppShell.tsx — rendered by app/_layout.tsx inside the providers
 import { Stack } from 'expo-router'
 import { useSession } from '@/hooks/useSession'
 
-const RootLayout = () => {
+const AppShell = () => {
   const { isAuthenticated, isLoading } = useSession()
 
   if (isLoading) return <SplashScreen />
@@ -143,7 +143,7 @@ const RootLayout = () => {
   )
 }
 
-export default RootLayout
+export default AppShell
 ```
 
 ## State Management

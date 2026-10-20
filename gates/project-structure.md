@@ -9,7 +9,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 ```
 .
 ├── app/                        # Expo Router routes — the file tree is the navigation tree
-│   ├── _layout.tsx             # Root layout: providers, persisted QueryClient, Stack.Protected auth gate
+│   ├── _layout.tsx             # Root layout: the providers; renders AppShell, which holds the auth gate
 │   ├── (auth)/
 │   │   ├── _layout.tsx
 │   │   └── sign-in.tsx         # Apple + Google buttons
@@ -22,6 +22,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 │   └── +not-found.tsx
 ├── src/
 │   ├── components/             # UI components, each in its own folder (see below)
+│   │   ├── AppShell/           # Stack.Protected auth gate, focus wiring, the UpdateRequired screen
 │   │   └── ui/                 # React Native Reusables copy-in primitives (kebab-case, owned by its CLI)
 │   ├── hooks/                  # Cross-cutting hooks flat (useSession.ts, useDebounce.ts)
 │   │   └── workouts/           # one folder per TanStack domain (see tanstack-query)
@@ -32,6 +33,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 │   │   ├── queryClient.ts      # createAppQueryClient() + queryPersister (see tanstack-query)
 │   │   ├── prefetch.ts         # prefetchInitialData() — the sign-in prefetch registry
 │   │   ├── time.ts             # seconds() / minutes() / hours()
+│   │   ├── version.ts          # isVersionBelow() for min_supported_version
 │   │   └── api/                # Network layer: dataError.ts + one fetcher file per domain
 │   ├── schemas/                # Zod schemas: <domain>.schema.ts
 │   ├── stores/                 # Zustand stores: use<Name>Store.ts
@@ -57,7 +59,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 The `app/` directory is **routing only**. A file in `app/` is a screen; its job is to read route params, mount a layout, and compose components and hooks from `src/`. No business logic, no large render trees, no large state in a route file — if a screen file grows past ~100 lines, the logic moves to a hook (`src/hooks/`) and the rendering to components (`src/components/`).
 
 - **Route groups** `(name)/` organise screens without adding a URL segment — use them to split signed-in vs signed-out stacks.
-- **Layouts** `_layout.tsx` define the navigator (`Stack` / `NativeTabs`) and wrap providers. The root `_layout.tsx` is where the auth gate lives.
+- **Layouts** `_layout.tsx` define the navigator (`Stack` / `NativeTabs`) and wrap providers. The root `_layout.tsx` mounts the providers and renders `AppShell`, which holds the auth gate (its hooks need those providers above them).
 - **Dynamic routes** `[id].tsx` read their param with `useLocalSearchParams`.
 
 ### Components — each in its own folder
