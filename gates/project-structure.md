@@ -78,7 +78,6 @@ components/WorkoutCard/WorkoutCard.tsx    # PascalCase folder + file for compone
 components/ui/button.tsx                  # Reusables primitives — kebab-case, CLI-owned
 hooks/useSession.ts                       # camelCase, 'use' prefix — cross-cutting hooks, flat
 hooks/workouts/workouts.cache.ts          # per-domain query keys + queryOptions (see tanstack-query)
-hooks/workouts/useWorkouts.ts             # per-domain query/mutation hook — one per file
 stores/useSettingsStore.ts                # camelCase, 'use' prefix, 'Store' suffix
 lib/api/workouts.ts                       # network fetchers — camelCase, plural resource, no Api suffix
 schemas/workout.schema.ts                 # Zod schemas — camelCase with .schema suffix

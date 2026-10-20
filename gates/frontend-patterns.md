@@ -6,7 +6,7 @@ Patterns for the app stack: **Expo (current stable SDK) + Expo Router + React Na
 
 ### Reuse before build
 
-Before writing a new component, search for one that does the job. Order of preference: an **Expo UI native control** when the platform already draws it (switches, pickers, date pickers, context menus, bottom sheets) → a **Reusables component** in `@/components/ui` (`Button`, `Text`, `Input`, `Card`, `Dialog`, `Select` — add a missing one with `npx react-native-reusables@latest add <component>`) → an existing component in `src/components/` → a composition of those → only then build new. Same for hooks and utilities. Bespoke components are a liability — justify why an existing piece won't work first.
+Before writing a new component, search for one that does the job. Order of preference: an **Expo UI native control** when the platform already draws it (switches, pickers, date pickers, context menus, bottom sheets) → a **Reusables component** in `@/components/ui` (`Button`, `Text`, `Input`, `Card`, `Dialog`, `Select` — add a missing one with the Reusables CLI) → an existing component in `src/components/` → a composition of those → only then build new. Same for hooks and utilities. Bespoke components are a liability — justify why an existing piece won't work first.
 
 ### One component per file
 
@@ -226,7 +226,7 @@ Multi-step wizards use a **single RHF instance at the parent**, shared via `Form
 
 ## Loading, Empty, and Error States
 
-Every screen that loads data handles three states explicitly: **loading, empty, error** — never just the happy path. Drive them off the query object (`isLoading`, `error`, empty `data`) in that priority order (see `WorkoutList` above). Skeletons live next to the component they shadow, match its shape, and are built from the Reusables `Skeleton` component. Mutations follow the same shape: pending (disable the submit, show an indicator off `mutation.isPending`), success (toast / navigate), error (inline near the field, or a toast).
+Every screen that loads data handles **loading, empty, error** explicitly, in that priority order off the query object (`isLoading`, `error`, empty `data` — see `WorkoutList` above). Skeletons sit next to the component they shadow, match its shape, and are built from the Reusables `Skeleton`. Mutations do the same: pending off `mutation.isPending` (submit disabled), success (toast / navigate), error (inline or toast).
 
 ## Optimistic UI
 

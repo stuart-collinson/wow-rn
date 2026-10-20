@@ -36,13 +36,10 @@ src/
 │   ├── supabase.ts               the typed client — createClient<Database>() (see security-standards)
 │   ├── storage.ts                kvStorage — expo-sqlite/kv-store, shared by the persister and Zustand
 │   ├── queryClient.ts            createAppQueryClient() + queryPersister + persistOptions
-│   ├── prefetch.ts               the prefetch registry warmed after sign-in
-│   ├── time.ts                   seconds() / minutes() / hours() duration helpers
 │   └── api/
 │       ├── dataError.ts          DataError + unwrap() / assertOk() — the only place a Supabase error is interpreted
 │       └── <domain>.ts           the domain's NETWORK layer (a sub-folder when it spans sub-resources)
 └── hooks/
-    ├── useDebounce.ts            generic, cross-cutting UI hooks stay flat here
     └── <domain>/                 the domain's REACT-QUERY layer
         ├── <domain>.cache.ts     query keys + stale times + queryOptions factories — ALWAYS at the domain root
         ├── prefetch<Domain>Queries.ts   warms the domain's queries — ALWAYS at the domain root
@@ -59,11 +56,11 @@ Everything else — `lib/api/<domain>.ts`, `hooks/<domain>/<domain>.cache.ts`, t
 
 - Anything that comes from Supabase is **server state** and lives in the TanStack cache by default. Stop hand-rolling `useState` + `useEffect` + a query for server reads.
 - Client / UI state (form drafts, toggles, selections, filters) stays in component state or Zustand — see `frontend-patterns`. **Never mirror query data into Zustand**: that creates two sources of truth that drift.
-- **RLS scopes every row to the signed-in user.** Fetchers never filter by `user_id` to "be safe" — the policy does that, and a filter in the client hides a missing policy.
+- **RLS scopes every row to the signed-in user.** Fetchers never filter by `user_id` — a client-side filter hides a missing policy.
 
 ## 2. One QueryClient — global defaults in `lib/queryClient.ts`
 
-Create it **once** at the app root and tune defaults for mobile. TanStack v5's out-of-the-box defaults (`staleTime: 0`, refetch on mount / focus / reconnect, `retry: 3`) refetch aggressively — fine on the web, wasteful of battery and cellular data. Set a modest global `staleTime` floor, let each domain tune up from there in its cache file, and give `gcTime` the same life as the persisted cache.
+Create it **once** at the app root and tune defaults for mobile: TanStack's defaults (`staleTime: 0`, refetch on mount / focus / reconnect, `retry: 3`) are wasteful of battery and cellular data. Set a modest `staleTime` floor, let each domain tune up in its cache file, and give `gcTime` the same life as the persisted cache.
 
 ```ts
 // lib/queryClient.ts
@@ -121,28 +118,23 @@ return (
 ```
 
 - Reads are instant from cache, then refetched when stale. **Writes need a connection** — there is no offline mutation queue; a failed mutation surfaces to the user (§8).
-- **Sign-out clears everything.** The persisted cache is one user's data. The sign-out hook calls `signOutRequest()` (in `lib/api/auth.ts`), then `queryClient.clear()`, then `await queryPersister.removeClient()`, *before* the auth gate flips to the signed-out stack. Skipping either step shows the next user the previous user's screens.
+- **Sign-out clears everything.** The sign-out hook calls `signOutRequest()` (`lib/api/auth.ts`), then `queryClient.clear()`, then `await queryPersister.removeClient()`, *before* the auth gate flips. Skipping a step shows the next user the previous user's screens.
 
 ## 3. React Native wiring — `focusManager` + `onlineManager`
 
 Two bits of wiring at the app root, done **once**. Without them, `refetchOnWindowFocus` never fires (there is no browser window) and queries keep firing with no connection.
 
 ```ts
-// focus: in a useEffect with cleanup in the root layout — refetch stale queries on foreground
-const onAppStateChange = (status: AppStateStatus) => focusManager.setFocused(status === 'active')
-useEffect(() => {
-  const subscription = AppState.addEventListener('change', onAppStateChange)
-  return () => subscription.remove()
-}, [])
+// root layout, inside a useEffect with cleanup — refetch stale queries when the app returns to the foreground
+const subscription = AppState.addEventListener('change', (status) => focusManager.setFocused(status === 'active'))
+return () => subscription.remove()
 
-// online: once at module load — pause queries/mutations when offline, resume on reconnect
+// module load, once — pause queries and mutations while offline, resume on reconnect (expo-network)
 onlineManager.setEventListener((setOnline) => {
   const subscription = Network.addNetworkStateListener((state) => setOnline(!!state.isConnected))
-  return subscription.remove
+  return () => subscription.remove()
 })
 ```
-
-(`AppState` from `react-native`, `Network` from `expo-network`, the managers from `@tanstack/react-query`.)
 
 ## 4. The network layer — `lib/api/<domain>.ts` on `supabase-js`
 
@@ -216,7 +208,7 @@ export const deleteWorkoutRequest = async (id: string): Promise<void> =>
 ```
 
 - **Naming is a fixed convention.** Reads are `fetch<Domain>` / `fetch<Domain>List`; every write is `<verb><Domain>Request`. No bare imperative names (`getWorkout`, `listWorkouts`).
-- **Explicit columns, always.** `WORKOUT_COLUMNS` is a `const` string in `types/workout.types.ts` listing every column the mapper reads; never `select('*')`, which silently widens with schema drift. Related rows come from relational selects (`exercise:exercise_id(id, name)`), never a loop.
+- **Explicit columns, always.** `WORKOUT_COLUMNS` (`types/workout.types.ts`) lists every column the mapper reads; never `select('*')`. Related rows come from relational selects (`exercise:exercise_id(id, name)`), never a loop.
 - **Rows are `snake_case`; domain types are `camelCase`.** The mapper (`toWorkout(row: WorkoutRow): Workout`) lives beside the type in `types/<domain>.types.ts`, where `WorkoutRow` is `Database['public']['Tables']['workout']['Row']` from the generated types. Hooks and screens never see a snake_case field.
 - **Inserts never set `user_id`.** The column defaults to `auth.uid()` (see `database-standards`); the row belongs to whoever is signed in, and a client can't claim otherwise.
 - **The seam.** Only `lib/api/` imports `@/lib/supabase`. If an app ever gains a Hono API, a `client.ts` returns here and each fetcher becomes one HTTP call; nothing above this folder changes.
@@ -286,7 +278,7 @@ export const workoutDetailQuery = (id: string) =>
 
 - **Reference / slow-moving data** (a catalogue, a profile, `app_config`) — long `staleTime` (minutes to an hour+).
 - **Live / fast-moving data** (a feed during activity, anything tied to an in-progress process) — short `staleTime` or `0`, and consider polling (§9) or Realtime (§9a).
-- **The global floor (§2) is a backstop, not a target.** It stops refetch storms between screens; the per-query value is where the real decision lives.
+- **The global floor (§2) is a backstop, not a target**; the per-query value is the real decision.
 
 ## 7. Hooks — thin React-Query bindings
 
@@ -342,7 +334,7 @@ In the hook: `refetchInterval: (query) => isInProgress(query.state.data?.status)
 
 ### 9a. Realtime — optional, per domain
 
-When a screen must reflect other devices' writes live, subscribe to Supabase Realtime and **invalidate the matching keys** — never write Realtime payloads into the cache by hand. The subscription lives in the fetcher file (`subscribeToWorkouts(onChange)` returning an unsubscribe function); a `useWorkoutsRealtime()` hook calls it in a `useEffect` and invalidates `workoutKeys.all` on every event. Enable Realtime on the table in a migration; it is off by default and costs nothing while unused.
+When a screen must reflect other devices' writes live, subscribe to Supabase Realtime and **invalidate the matching keys** — never write payloads into the cache by hand. The subscription lives in the fetcher file (`subscribeToWorkouts(onChange)` returning an unsubscribe); a `useWorkoutsRealtime()` hook calls it in a `useEffect` and invalidates `workoutKeys.all`. Enable Realtime on the table in a migration; it is off by default.
 
 ## 10. Lists & pagination — `useInfiniteQuery` + `FlatList`
 
@@ -355,10 +347,7 @@ Long lists paginate by **keyset** (never offset): the fetcher orders by `created
 Warm the cache for the screens the user lands on right after they sign in. Because the prefetch reuses the same `queryOptions`/`infiniteQueryOptions` factory, the eventual `useQuery` on the screen hits a populated, correctly-keyed entry — no duplicate fetch.
 
 ```ts
-// hooks/workouts/prefetchWorkoutQueries.ts — filters MUST match the screen's defaults
-export const prefetchWorkoutQueries = (queryClient: QueryClient) =>
-  queryClient.prefetchInfiniteQuery(workoutListQuery({ pageSize: 20 }))
-
+// hooks/workouts/prefetchWorkoutQueries.ts: queryClient.prefetchInfiniteQuery(workoutListQuery({ pageSize: 20 })) — filters match the screen's defaults
 // lib/prefetch.ts — one registry, walked once after sign-in; adding a domain is one line
 const TASKS = [
   { domain: 'workouts', run: prefetchWorkoutQueries },
@@ -403,7 +392,7 @@ Consumers read `config?.ads_enabled === true` — a missing row, a failed fetch,
 
 ## 13. Directory layout, barrels & comments
 
-- **Large domain (≈6+ hooks): own folder** `hooks/<domain>/` holding the cache file, prefetch, its `use*` hooks, **and any domain-specific non-query React hooks**. A *cross-cutting* hook (`useDebounce`) stays flat in `hooks/`. Sub-resource sub-folders (`hooks/<domain>/<sub>/`, mirrored as `lib/api/<domain>/<sub>.ts`) when a domain spans several; the domain-root files always stay at the root.
+- **`hooks/<domain>/`** holds the cache file, prefetch, the `use*` hooks and any domain-specific non-query React hooks; cross-cutting hooks (`useDebounce`) stay flat in `hooks/`. Sub-resource sub-folders (`hooks/<domain>/<sub>/`, mirrored as `lib/api/<domain>/<sub>.ts`) when a domain spans several; the domain-root files always stay at the root.
 - **No barrel / `index.ts` aggregator — anywhere.** Consumers import each hook directly.
 - **Comments:** `use*` hooks, prefetch files and fetchers default to **zero comments** — they are plumbing. `<domain>.cache.ts` is the one place a comment is sanctioned, and only for non-obvious cache reasoning. No `as any` to read an error field — narrow with `error instanceof DataError`.
 
