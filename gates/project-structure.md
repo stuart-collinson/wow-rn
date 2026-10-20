@@ -61,6 +61,7 @@ The `app/` directory is **routing only**. A file in `app/` is a screen; its job 
 - **Route groups** `(name)/` organise screens without adding a URL segment — use them to split signed-in vs signed-out stacks.
 - **Layouts** `_layout.tsx` define the navigator (`Stack` / `NativeTabs`) and wrap providers. The root `_layout.tsx` mounts the providers and renders `AppShell`, which holds the auth gate (its hooks need those providers above them).
 - **Dynamic routes** `[id].tsx` read their param with `useLocalSearchParams`.
+- **One screen file serves iOS and Android.** A small difference is a `Platform.OS` check in place (the Apple sign-in button renders on iOS only; `expo-apple-authentication` has no Android). A component that diverges wholesale gets a `Name.ios.tsx` beside the default `Name.tsx`, and Metro picks per platform. Never a second screen per platform.
 
 ### Components — each in its own folder
 
@@ -69,6 +70,17 @@ Every component in `src/components/` lives in a folder named after it, the file 
 - **Standalone** — `components/AdBanner/AdBanner.tsx`.
 - **Domain group** (2+ peers sharing a prefix) — `components/Workout/WorkoutRow.tsx`, `components/Workout/WorkoutStatsBanner.tsx`. Keep the domain prefix on the filename so imports stay self-describing.
 - **Compound family** (one component with internal sub-components) — `components/Calendar/Calendar.tsx` (parent) + `components/Calendar/CalendarDay.tsx` (child, prefix stripped). Driven by composition, not domain count.
+
+**A screen's own components** are a domain group named after the screen. The route file renders the sections; a section's children sit beside it as peers with the same prefix, because folders under `components/` never nest. A component a second screen needs moves up to its own folder or its domain's group.
+
+```
+app/(tabs)/index.tsx                     # the Home screen: calls hooks, renders the sections
+components/Home/HomeHeader.tsx
+components/Home/HomeStats.tsx
+components/Home/HomeStatTile.tsx         # HomeStats' child — a peer, not a subfolder
+components/Home/HomeRecentWorkouts.tsx
+components/Workout/WorkoutRow.tsx        # the Workouts tab uses it too, so not under Home/
+```
 
 One exception: **`components/ui/`** holds React Native Reusables' copy-in primitives flat in kebab-case (`button.tsx`, `text.tsx`, `input.tsx`). That layout is owned by the Reusables CLI (`npx react-native-reusables@latest add <component>`); the files are yours to edit, but don't reformat the folder or put bespoke components there.
 

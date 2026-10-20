@@ -10,7 +10,7 @@ Before writing a new component, search for one that does the job. Order of prefe
 
 ### One component per file
 
-Every component file defines exactly one component. Sub-components get their own file inside a folder named after the parent (see `project-structure`). The parent owns data, state, and handlers; sub-components are pure rendering of a single concern.
+Every component file defines exactly one component. Sub-components get their own file in the parent's folder (see `project-structure`). The parent owns data, state, and handlers; sub-components are pure rendering of a single concern.
 
 ```tsx
 // PASS — WorkoutList/WorkoutList.tsx owns logic, composes children
@@ -161,12 +161,7 @@ Pick the smallest tool that fits.
 
 ### Server state — TanStack Query
 
-All data from Supabase is server state and lives in the TanStack Query cache. **The full data layer — the `lib/api/` ↔ `hooks/<domain>/` split, the typed Supabase client, query keys, caching, `queryOptions`, hooks, mutations, invalidation, polling, pagination, persistence and prefetch — is owned by the `tanstack-query` gate. Read it before fetching anything.** The headline rule: every domain is laid out identically — the Supabase query in `lib/api/<domain>.ts`, the React-Query layer (`<domain>.cache.ts` + `use*` hooks + `prefetch<Domain>Queries.ts`) in `hooks/<domain>/`.
-
-Two rules survive here unchanged:
-
-- **Never import the Supabase client from a component.** Every read and write goes through a typed fetcher in `lib/api/<domain>.ts`; the client lives in `lib/supabase.ts` and nothing above `lib/` touches it.
-- **Server reads go through a `use*` hook backed by the cache** — not `useState` + `useEffect`. **Never mirror query data into Zustand**; that creates two sources of truth that drift.
+All data from Supabase is server state, and **the `tanstack-query` gate owns all of it** — the `lib/api/` ↔ `hooks/<domain>/` split, query keys, caching, mutations, persistence and prefetch. Nothing above `lib/` imports the Supabase client, and a server read is a cached `use*` hook, never `useState` + `useEffect`.
 
 ### Zustand for shared client state
 
@@ -226,11 +221,7 @@ Multi-step wizards use a **single RHF instance at the parent**, shared via `Form
 
 ## Loading, Empty, and Error States
 
-Every screen that loads data handles **loading, empty, error** explicitly, in that priority order off the query object (`isLoading`, `error`, empty `data` — see `WorkoutList` above). Skeletons sit next to the component they shadow, match its shape, and are built from the Reusables `Skeleton`. Mutations do the same: pending off `mutation.isPending` (submit disabled), success (toast / navigate), error (inline or toast).
-
-## Optimistic UI
-
-Optimistic mutations are owned by the `tanstack-query` gate (cancel / snapshot / rollback). Never optimistic for destructive mutations or unpredictable server results — show `mutation.isPending` there.
+Every screen that loads data handles **loading, empty, error** explicitly, in that priority order off the query object (`isLoading`, `error`, empty `data` — see `WorkoutList` above). Skeletons sit next to the component they shadow, match its shape, and are built from the Reusables `Skeleton`. Mutations do the same: pending off `mutation.isPending` (submit disabled), success (toast / navigate), error (inline or toast). Optimistic updates are opt-in and owned by `tanstack-query` §8.
 
 ## Lists — `FlatList`, not `.map`
 
