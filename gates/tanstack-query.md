@@ -2,7 +2,7 @@
 
 Server state lives in **TanStack Query v5** (`@tanstack/react-query`). This gate owns the data layer for the app: the per-domain directory shape, the Supabase network layer, query keys, stale times, `queryOptions`, hooks, mutations, invalidation, polling, pagination, persistence, and prefetch. Where this gate and the data-fetching notes in `frontend-patterns` / `project-structure` disagree, **this gate wins**.
 
-It is written to be **project-agnostic**. It assumes the stack in `project-structure` (one Expo app talking to its own Supabase project, RLS as the authorisation layer), but nothing here depends on a particular domain. The point of the gate is not the example domain — it's the **shape**. Every domain that touches the network is laid out identically, so any screen's data story reads the same way and a new domain is a copy-paste-and-rename away.
+It assumes the stack in `project-structure` (one Expo app talking to its own Supabase project, RLS as the authorisation layer). The point of the gate is not the example domain — it's the **shape**: every domain that touches the network is laid out identically, so a new domain is a copy-paste-and-rename away.
 
 ---
 
@@ -13,10 +13,8 @@ It is written to be **project-agnostic**. It assumes the stack in `project-struc
 | File | Lives in | Holds |
 | --- | --- | --- |
 | `lib/api/<domain>.ts` | **`lib/api/`** — never under `hooks/` | the network layer: fetcher functions on `supabase-js` |
-| `lib/api/<domain>/<sub>.ts` | `lib/api/<domain>/` | network sub-file when a domain has distinct sub-resources |
 | `hooks/<domain>/<domain>.cache.ts` | `hooks/<domain>/` | query keys + stale times + `queryOptions` factories (one per domain, at the domain root) |
 | `hooks/<domain>/use<Domain><Verb>.ts` | `hooks/<domain>/` | every `use*` hook — query, mutation, and domain-specific non-query — one per file |
-| `hooks/<domain>/<sub>/use<Domain><SubVerb>.ts` | `hooks/<domain>/<sub>/` | hooks grouped under a sub-resource folder when a domain spans many sub-entities |
 | `hooks/<domain>/prefetch<Domain>Queries.ts` | `hooks/<domain>/` | warms the domain's queries (e.g. on sign-in) |
 
 **The dividing line, stated once and applied everywhere: is it React / React-Query (hooks, query keys, `queryOptions`, `prefetchQuery`) → `hooks/<domain>/`. Is it a Supabase call → `lib/api/<domain>.ts`.** A file with no React and no TanStack import never belongs under `hooks/`, and the Supabase client is never imported above `lib/`.
@@ -331,7 +329,7 @@ A mutation hook owns the write and the cache reconciliation that follows it. Pre
   }
   ```
 
-- **`setQueryData` — write the cache directly when you already hold the authoritative value** (the mutation returned the updated row): `queryClient.setQueryData(workoutKeys.detail(id), updated)`. Don't hand-roll cache data you only *think* is right — invalidate instead.
+- **`setQueryData` only with an authoritative value** (the mutation returned the updated row): `queryClient.setQueryData(workoutKeys.detail(id), updated)`. Otherwise invalidate.
 - **Invalidate by the narrowest prefix that covers the change.** A new row in a list → `workoutKeys.lists()`, not `workoutKeys.all`.
 - **On error, leave the cache untouched** (unless you ran an optimistic update) and surface the failure to the user. A `DataError` with code `42501` is an RLS denial — a missing policy, never something to retry or hide.
 - **Optimistic UI is opt-in** for mutations whose result is predictable (toggling a favourite, renaming): in `onMutate` cancel the query, snapshot `getQueryData`, `setQueryData` the expected value and return the snapshot; in `onError` restore it; in `onSettled` invalidate. Never for destructive mutations (delete, archive) or unpredictable server results — show `mutation.isPending` there.
@@ -340,21 +338,7 @@ A mutation hook owns the write and the cache reconciliation that follows it. Pre
 
 Some queries track an async server-side process and must poll until it reaches a terminal state. `refetchInterval` belongs in the **hook**, never in a `queryOptions` factory — it's a runtime view concern, not a cache definition.
 
-```ts
-const POLL_INTERVAL = seconds(3)
-
-export const useImportJob = (id: string | undefined) =>
-  useQuery({
-    ...importJobQuery(id ?? ''),
-    enabled: Boolean(id),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === 'pending' || status === 'processing' ? POLL_INTERVAL : false
-    },
-  })
-```
-
-Callback form, not a bare number; name the interval constant; cap the poll with a terminal-state condition. Polling is for genuine async server work only — for user-triggered refreshes use pull-to-refresh (`refetch`).
+In the hook: `refetchInterval: (query) => isInProgress(query.state.data?.status) ? POLL_INTERVAL : false`, with `POLL_INTERVAL` a named constant at the top of the file. Callback form, not a bare number; the terminal-state condition caps the poll. Polling is for genuine async server work only — for user-triggered refreshes use pull-to-refresh (`refetch`).
 
 ### 9a. Realtime — optional, per domain
 
@@ -364,20 +348,7 @@ When a screen must reflect other devices' writes live, subscribe to Supabase Rea
 
 Long lists paginate by **keyset** (never offset): the fetcher orders by `created_at desc, id desc`, fetches one more row than the page size to learn `hasMore`, and returns the last row's `created_at` as `nextCursor` (§4). There is no URL to hold the cursor on a device, so it lives in the infinite-query cache, not in app state.
 
-```ts
-// hooks/workouts/useWorkouts.ts
-export const useWorkouts = (params: Omit<WorkoutListParams, 'cursor'>) =>
-  useInfiniteQuery(workoutListQuery(params))
-
-// the screen — flatten pages, drive fetchNextPage off onEndReached
-const { data, fetchNextPage, hasNextPage, isFetching } = useWorkouts({ pageSize: 20 })
-const workouts = data?.pages.flatMap((page) => page.data) ?? []
-<FlatList data={workouts} keyExtractor={(workout) => workout.id} renderItem={({ item }) => <WorkoutRow workout={item} />}
-  onEndReached={() => hasNextPage && !isFetching && fetchNextPage()} onEndReachedThreshold={0.5} />
-```
-
-- **Guard `fetchNextPage` on `hasNextPage && !isFetching`** — calling it while a fetch is in flight or with no next page races and double-fetches.
-- A `created_at` cursor can skip rows that share a timestamp to the microsecond. For tables written in batches, add the `id` tie-break with an `or(...)` filter; for ordinary user-driven tables it isn't worth the noise.
+`useWorkouts` is `useInfiniteQuery(workoutListQuery(params))`. The screen flattens `data?.pages.flatMap((page) => page.data)` into the `FlatList` and calls `fetchNextPage()` from `onEndReached`, **guarded on `hasNextPage && !isFetching`** — calling it while a fetch is in flight or with no next page races and double-fetches. A `created_at` cursor can skip rows sharing a timestamp to the microsecond; add the `id` tie-break with an `or(...)` filter only for batch-written tables.
 
 ## 11. Prefetch — a per-domain helper + one registry
 
@@ -444,8 +415,4 @@ Consumers read `config?.ads_enabled === true` — a missing row, a failed fetch,
 2. **Network layer →** `lib/api/<domain>.ts`: one query per operation on `@/lib/supabase`, explicit columns, `unwrap`/`assertOk`, the mapper. `fetch<Domain>[List]` for reads, `<verb><Domain>Request` for writes. No `user_id` filters, no `try`/`catch`, no comments.
 3. **Cache file →** `hooks/<domain>/<domain>.cache.ts`: key factory, local `STALE_TIMES`, a `queryOptions`/`infiniteQueryOptions` factory per read query.
 4. **Hooks →** `hooks/<domain>/use<Domain><Verb>.ts`, one export per file, spreading the factory, `enabled` guards.
-5. **Mutations →** invalidate the narrowest prefix, or `setQueryData` when the response is authoritative. Optimistic only when predictable.
-6. **Polling / Realtime →** only when the data genuinely needs it; neither by default.
-7. **Pagination →** keyset in the fetcher, `useInfiniteQuery` + `FlatList` `onEndReached`.
-8. **Prefetch →** `prefetch<Domain>Queries.ts` + one line in `lib/prefetch.ts`, for domains users land on.
-9. **No barrel.**
+5. **Mutations →** invalidate the narrowest prefix, or `setQueryData` when the response is authoritative; optimistic only when predictable. **Pagination →** keyset in the fetcher + `useInfiniteQuery`. **Prefetch →** `prefetch<Domain>Queries.ts` + one line in `lib/prefetch.ts`. **No barrel.** Polling and Realtime only when the data needs them.

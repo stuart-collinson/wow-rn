@@ -63,7 +63,7 @@ const StatCard = ({ label, value }: Props) => (
 
 ### Expo UI versus Tailwind
 
-Native chrome and native controls come from Expo Router (tabs, stack headers, toolbars) and **Expo UI** (`@expo/ui`: SwiftUI on iOS, Jetpack Compose on Android). An Expo UI component is styled by its own props and follows the system theme; it never takes `className`, is never wrapped with `withUniwind`, and renders inside a `Host`. Everything else — the content area where the brand lives — is React Native views and Reusables styled with Tailwind. Where Expo UI lacks a control or behaves awkwardly, Reusables is the fallback; never a third library.
+Native chrome and controls come from Expo Router (tabs, headers, toolbars) and **Expo UI** (`@expo/ui`: SwiftUI on iOS, Jetpack Compose on Android). An Expo UI component is styled by its own props, follows the system theme, renders inside a `Host`, and never takes `className` or `withUniwind`. Everything else — the content where the brand lives — is React Native views and Reusables styled with Tailwind. Where Expo UI lacks a control, Reusables is the fallback; never a third library.
 
 ```tsx
 // PASS — a native switch inside branded content
@@ -110,10 +110,7 @@ const TabsLayout = () => (
       <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} md={{ default: 'home', selected: 'home_filled' }} />
       <NativeTabs.Trigger.Label>Home</NativeTabs.Trigger.Label>
     </NativeTabs.Trigger>
-    <NativeTabs.Trigger name="workouts">
-      <NativeTabs.Trigger.Icon sf={{ default: 'figure.run', selected: 'figure.run' }} md={{ default: 'directions_run', selected: 'directions_run' }} />
-      <NativeTabs.Trigger.Label>Workouts</NativeTabs.Trigger.Label>
-    </NativeTabs.Trigger>
+    {/* one Trigger per tab route */}
   </NativeTabs>
 )
 
@@ -245,7 +242,7 @@ Optimise when you measure a problem. The React Compiler is on, so don't hand-wri
 
 ## Adaptive Layouts — iPad
 
-Every app ships with `ios.supportsTablet: true`, so every screen must earn its width. Uniwind's responsive variants are mobile-first and keyed to device width: unprefixed classes apply everywhere, `md:` (768pt and up) is the tablet breakpoint, `lg:` (1024pt) landscape tablets. A list-detail screen goes side by side at `md:`, a form caps its width, a card grid goes from one column to two. Never a hard-coded width check in a component — if a layout needs the number, it comes from `src/constants/breakpoints.ts`.
+Every app ships with `ios.supportsTablet: true`, so every screen must earn its width. Uniwind's responsive variants are mobile-first: unprefixed classes apply everywhere, `md:` (768pt and up) is the tablet breakpoint, `lg:` (1024pt) landscape tablets. A list-detail screen goes side by side at `md:`, a form caps its width, a grid gains a column. Never a hard-coded width check in a component; a layout that needs the number reads `src/constants/breakpoints.ts`.
 
 ```tsx
 // PASS — one column on a phone, two on an iPad; a form that doesn't stretch across a 13-inch screen

@@ -15,7 +15,7 @@ const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_P
 - Anything `EXPO_PUBLIC_*` is **readable by anyone with the app** — treat it as published. Public by design: the Supabase publishable key, RevenueCat's public SDK keys, AdMob app and unit IDs. They identify; they don't authorise.
 - The Supabase **secret key**, webhook secrets, and any third-party server key live **only in Edge Function secrets** (`edge-functions`). Never in `EXPO_PUBLIC_*`, never in `app.json`, never in git.
 - Only the new key names exist in a repo: `sb_publishable_…` in the app, `sb_secret_…` on the server. The legacy key pair Supabase deprecates at the end of 2026 must not appear.
-- No hardcoded keys, tokens, or passwords anywhere. `.env*` files are gitignored; `.env.example` ships with empty values; build-time values live in EAS environment variables.
+- No hardcoded keys, tokens, or passwords anywhere. `.env*` files are gitignored; `.env.example` ships with empty values.
 
 **Checklist:** no secrets in the bundle · publishable key only in the app · secret key only in Edge Functions · legacy key names absent · `.env*` gitignored.
 
@@ -28,13 +28,9 @@ import 'expo-sqlite/localStorage/install'
 export const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
   auth: { storage: globalThis.localStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
 })
-
-AppState.addEventListener('change', (state) =>
-  state === 'active' ? supabase.auth.startAutoRefresh() : supabase.auth.stopAutoRefresh(),
-)
 ```
 
-- **The default is the app sandbox**, which iOS and Android encrypt at rest per app. It is what Expo's own Supabase integration scaffolds, and it is right for the apps this stack targets.
+- **The default is the app sandbox**, which iOS and Android encrypt at rest per app — what Expo's own Supabase integration scaffolds. `startAutoRefresh()` / `stopAutoRefresh()` follow `AppState` so tokens refresh in the foreground.
 - **Escalation rule:** an app handling health, finance, or similarly sensitive data stores the session with Supabase's documented `LargeSecureStore` pattern (an AES key in `expo-secure-store`, the encrypted session blob in `kvStorage`). Copy that pattern verbatim; Supabase warns that "optimising" it introduces subtle vulnerabilities.
 - `kvStorage` (`expo-sqlite/kv-store`) holds non-sensitive state: the query cache, settings, review-prompt counters. Anything secret a user types in (a key to a service they own) goes in `expo-secure-store`.
 - No token ever lands in a Zustand store, a log line, or a component prop.
@@ -53,8 +49,6 @@ if (!parsed.success) return <NotFound />
 - All user input, **deep-link / route params**, Edge Function payloads, and `app_config` values are validated with Zod before use — a deep link is attacker-controllable input, and a config row was typed by hand.
 - Whitelist, don't blacklist. Error messages don't leak sensitive info.
 
-**Checklist:** all inputs Zod-validated · deep-link params validated · `app_config` parsed by `appConfigSchema` · webhook payloads validated.
-
 ## Authorisation — RLS is the floor
 
 Authorisation lives in the database, never in the app. The client deciding "this user is pro, show the button" is a UX nicety, not a security control — a modified client skips it.
@@ -63,8 +57,6 @@ Authorisation lives in the database, never in the app. The client deciding "this
 - **The Supabase client is imported only in `lib/`** (`tanstack-query` → the seam). A `supabase.from()` in a component is a review failure because it is where ad-hoc, unreviewed access starts.
 - **Edge Functions verify their caller** with `verifyAuth` and read identity from the verified token, never from the body. The admin client appears only in jobs with no end-user caller, with a comment saying why.
 - **Privileged operations** (account deletion, anything touching `auth.users`) are `SECURITY DEFINER` functions that act on `auth.uid()` and nothing else.
-
-**Checklist:** RLS on all tables · client only in `lib/` · identity from the verified token · privileged work in a `SECURITY DEFINER` function scoped to the caller.
 
 ## Injection
 
@@ -122,11 +114,9 @@ console.log('[auth][signed-in]', { userId })
 | Ad request before the consent form resolves | HIGH | Gate on `initialiseAds()` |
 | Cleartext HTTP traffic | HIGH | HTTPS only |
 | Logging tokens / passwords / full bodies | MEDIUM | Redact, log shaped fields |
-| Public Storage bucket holding user data | MEDIUM | Private bucket + short signed URLs |
 
 ## Common False Positives
 
 - The Supabase **publishable** key, RevenueCat public SDK keys and AdMob IDs in the app — public by design; RLS and the stores guard the data and the money.
 - Values in `.env.example` (placeholders, not real secrets).
 - Test credentials in test files, clearly marked.
-- `crypto.randomUUID()` for filenames and idempotency keys is fine; only password hashing and signature verification need more.

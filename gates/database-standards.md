@@ -4,7 +4,7 @@ Rules for the Supabase Postgres schema, migrations, and RLS policies. Code-side 
 
 ## Migrations
 
-The schema lives **in code** as SQL migration files under `supabase/migrations/` at the repo root, one file per change, named `YYYYMMDDhhmmss_<description>.sql`. They are managed with the Supabase CLI and applied to the hosted project with `supabase db push` — the dashboard SQL editor is for inspection and one-off debugging, never for schema changes that aren't captured as a migration. (The dashboard **table editor** is the one sanctioned write path, and only for `app_config` values.)
+The schema lives **in code** as SQL migration files under `supabase/migrations/` at the repo root, one file per change, named `YYYYMMDDhhmmss_<description>.sql`. They are managed with the Supabase CLI and applied to the hosted project with `supabase db push` — the dashboard SQL editor is for inspection and one-off debugging, never for schema changes that aren't captured as a migration. The dashboard **table editor** is used for one thing: `app_config` values.
 
 - **Append-only.** Once a migration is merged, never edit it. If it was wrong, write a new migration that corrects it.
 - **One logical change per migration.** Adding a table, adding a column, changing a constraint — each is its own file.
@@ -23,11 +23,10 @@ supabase link --project-ref <project-ref>       # connect this repo to the app's
 
 # The change loop
 supabase start                                  # local stack (pnpm db:start)
-supabase migration new <description>            # creates supabase/migrations/<timestamp>_<description>.sql
-#   → write the idempotent SQL (see patterns below)
-supabase db reset && supabase db reset          # proves the chain applies, then that it re-applies (pnpm db:reset)
+supabase migration new <description>            # supabase/migrations/<timestamp>_<description>.sql — write idempotent SQL
+supabase db reset && supabase db reset          # applies the chain, then proves it re-applies (pnpm db:reset)
 supabase gen types typescript --local > src/types/database.types.ts   # pnpm db:types
-supabase db push                                # apply pending migrations to the hosted project (pnpm db:push)
+supabase db push                                # pending migrations → the hosted project (pnpm db:push)
 ```
 
 - **`supabase db push` only applies what's new** — migrations the remote has already recorded are skipped. Treat a push like a deploy: it goes straight to the one hosted project real users are on.
@@ -146,14 +145,14 @@ When policy logic gets complex (multi-table joins), extract it into a Postgres f
 
 ### Views over RLS-enforced tables
 
-A view does **not** inherit the RLS of its underlying tables by default — it runs as the view *owner*, bypassing RLS. Any view over an RLS-protected table MUST declare `WITH (security_invoker = on)` and an explicit `GRANT SELECT … TO authenticated`. Miss either and the view either leaks every user's rows or errors instead of returning an empty result.
+A view runs as its *owner* and bypasses RLS by default. Any view over an RLS-protected table MUST declare `WITH (security_invoker = on)` and an explicit `GRANT SELECT … TO authenticated`; miss either and it leaks every user's rows or errors.
 
 ## Functions, Triggers & Jobs
 
-- **RPC for atomic multi-table writes.** When one user action must change several tables, write a Postgres function and call it with `supabase.rpc('verb_noun', { … })` from the fetcher; the database guarantees all-or-nothing. Default to `SECURITY INVOKER` so RLS still applies inside the function.
+- **RPC for atomic multi-table writes.** One user action that changes several tables is a Postgres function called with `supabase.rpc('verb_noun', { … })` from the fetcher. Default to `SECURITY INVOKER` so RLS still applies inside it.
 - **`SECURITY DEFINER` only when the function must do what the caller can't** (touch `auth.users`, write a row for another user). Every such function sets `SET search_path = ''` and schema-qualifies every name, and grants `EXECUTE` to exactly the role that needs it with `REVOKE … FROM public, anon`.
 - **Triggers are for invariants the database alone guarantees** — `updated_at`, the profile row that must exist for every auth user. Not for business logic; that lives in the app or an RPC.
-- **Schedules and outbound calls stay in Postgres.** `pg_cron` runs cleanup and digests on a schedule; `pg_net` calls an Edge Function or webhook from SQL. Both are extensions enabled in a migration (`CREATE EXTENSION IF NOT EXISTS pg_cron`), and neither needs a server you run.
+- **Schedules and outbound calls stay in Postgres.** `pg_cron` for schedules, `pg_net` to call an Edge Function or webhook from SQL — both enabled in a migration with `CREATE EXTENSION IF NOT EXISTS`.
 
 ## Indexes
 
@@ -164,7 +163,7 @@ Postgres does not auto-index foreign keys, and most table-level performance issu
 - **Composite indexes put the most-selective column first.** A `(a, b)` index serves queries on `a` or `(a, b)`, not on `b` alone.
 - **Don't pre-emptively index everything** — indexes cost write performance and storage; small tables (a few thousand rows) seq-scan faster anyway.
 
-For `ILIKE '%term%'` substring search, use a GIN index with `gin_trgm_ops` (`CREATE EXTENSION IF NOT EXISTS pg_trgm`) and require a minimum search length of 3.
+Substring search (`ILIKE '%term%'`) wants a `pg_trgm` GIN index and a minimum search length of 3.
 
 ## The Skeleton Schema
 
@@ -180,9 +179,9 @@ Every app starts with five migrations, written into `supabase/migrations/` by `/
 
 ## Don'ts
 
-- Don't write a non-idempotent migration "because it only runs once" — there are no down-migrations, so a revert + re-apply will fail on an unguarded `CREATE` / `ADD COLUMN` / `CREATE POLICY` / seed `INSERT`.
+- Don't write a non-idempotent migration "because it only runs once" — there are no down-migrations; a revert + re-apply fails on anything unguarded.
 - Don't edit a merged migration — write a new one.
-- Don't disable RLS to debug a query — use the SQL editor as a privileged role, or write a temporary policy. RLS-off in code is how data leaks.
+- Don't disable RLS to debug a query — use the SQL editor as a privileged role. RLS-off in code is how data leaks.
 - Don't put business logic in triggers — `set_updated_at` and `handle_new_user` are invariants, not features.
 - Don't store structured data as a JSON blob when columns would do — `app_config` is the deliberate exception, because its values are hand-edited switches.
 - Don't use sequential IDs for anything user-facing — they leak record counts and make scraping easy.

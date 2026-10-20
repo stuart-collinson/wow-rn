@@ -1,6 +1,6 @@
 # Edge Functions
 
-The app talks to Supabase directly and RLS is the authorisation layer, so there is no API server. The small amount of code that must run on a server lives in **Supabase Edge Functions** under `supabase/functions/`, written so it never depends on the runtime it happens to run on today. Deno, which Edge Functions run on, is winding down; Supabase has said existing functions keep working and a Node/Bun-capable successor is coming. Functions written to this gate move there, or to any Web-standard runtime, unchanged.
+There is no API server: the app talks to Supabase directly and RLS authorises. The little code that must run on a server lives in **Supabase Edge Functions** under `supabase/functions/`, written so it never depends on today's runtime. Deno, which Edge Functions run on, is winding down; Supabase says existing functions keep working and a Node/Bun-capable successor is coming. Functions written to this gate move there, or to any Web-standard runtime, unchanged.
 
 ## When a function is justified
 
@@ -86,10 +86,8 @@ A webhook handler authenticates the sender, validates the payload, and is idempo
 ```ts
 // supabase/functions/revenuecat-webhook/index.ts
 import { createAdminClient } from 'npm:@supabase/server/core'
-import { z } from 'npm:zod'
 import { getEnv, serve } from '../_shared/runtime.ts'
-
-const eventSchema = z.object({ event: z.object({ id: z.string(), type: z.string(), app_user_id: z.string() }) })
+import { eventSchema } from '../_shared/revenuecat.ts'   // a Zod schema of the fields you read
 
 serve(async (request) => {
   if (request.headers.get('Authorization') !== `Bearer ${getEnv('REVENUECAT_WEBHOOK_SECRET')}`) {
@@ -114,14 +112,13 @@ serve(async (request) => {
 
 ## The push sender
 
-`send-push` reads `device_push_token` with the admin client for the users it is told to reach, sends through `npm:expo-server-sdk` (`new Expo().sendPushNotificationsAsync(chunk)` per `chunkPushNotifications` batch), and deletes tokens whose receipt says `DeviceNotRegistered`. It is called by `pg_net` from a trigger or a `pg_cron` schedule, or by an authenticated admin; it is never callable by `anon`.
+`send-push` reads `device_push_token` with the admin client for the users it is told to reach, sends through `npm:expo-server-sdk` in `chunkPushNotifications` batches, and deletes tokens whose receipt says `DeviceNotRegistered`. It is called by `pg_net` from a trigger or `pg_cron`, or by an authenticated admin — never by `anon`.
 
 ## Local run, deploy, logs
 
 ```bash
 supabase functions new <name>                       # scaffolds supabase/functions/<name>/index.ts
 supabase functions serve --env-file supabase/functions/.env   # serves every function locally against `supabase start`
-curl -X POST http://127.0.0.1:54321/functions/v1/<name> -H "Authorization: Bearer <token>"
 supabase functions deploy <name>                    # deploys one function to the hosted project
 ```
 

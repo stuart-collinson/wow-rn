@@ -2,7 +2,7 @@
 
 The shape of a React Native project: **one git repo per app**, holding an Expo app, that app's Supabase project, and nothing else. No workspace, no monorepo, no API server. `pnpm` is the package manager — never `npm`, `yarn` or `bun`. Every install is `pnpm add`, every script is `pnpm <script>`.
 
-Shared code does not travel between apps as a package. It arrives in a new app through the `/new-app` skill's recipe and reference files, and the rules that keep every app the same shape are these gates.
+Shared code does not travel between apps as a package; it arrives through the `/new-app` skill's recipe and reference files, and these gates keep every app the same shape.
 
 ## Repo Layout
 
