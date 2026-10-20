@@ -57,15 +57,17 @@ If none: _None found._
 | Arrow functions / no `function` keyword | | |
 | Naming conventions | | |
 | File structure (imports → types → logic → render) | | |
-| Styling (NativeWind className, no stray inline styles) | | |
-| Components (one per file, parent/child split, reuse) | | |
+| Styling (Uniwind className on RN views and Reusables; Expo UI untouched by className; no raw hex) | | |
+| Components (one per file, parent/child split, reuse order respected) | | |
 | State (TanStack Query for server, Zustand for shared, RHF for forms) | | |
+| Data layer (Supabase client only in `lib/`, fetcher per operation, cache file + queryOptions, no barrels) | | |
 | Loading / empty / error states handled | | |
-| Lists use FlatList/FlashList | | |
-| Navigation (Expo Router typed routes, auth gate) | | |
-| API layering (routes → controller → service → repository) | | |
-| Migrations idempotent + RLS in same file | | |
-| Security (no app secrets, SecureStore, server-side authz, input/deep-link validation) | | |
+| Lists use FlatList/FlashList; no manual memoisation | | |
+| Navigation (Expo Router typed routes, NativeTabs, Stack.Protected auth gate) | | |
+| Edge Functions (portable, caller verified, secrets via getEnv, idempotent webhooks) | | |
+| Migrations idempotent + RLS in same file; types regenerated | | |
+| Monetisation (AdBanner gated by app_config and consent; restore purchases present) | | |
+| Security (publishable key only, session storage rule, deep-link validation, no secrets in logs) | | |
 | No unused code / near-zero comments | | |
 
 Use ✅ clean, ⚠️ minor issues, ❌ violations.
