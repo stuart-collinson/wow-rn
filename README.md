@@ -1,48 +1,36 @@
 # wow-rn — my ways of working for React Native
 
-My engineering standards for **React Native** projects, packaged as a Claude Code plugin called `rn-ways-of-working`. It's a personal thing — one source of truth for how I want Claude to write code across my Expo apps, the same way [`wow`](https://github.com/stuart-collinson/wow) is for my Next.js work. A repo enables one or the other, never both.
+My engineering standards for **React Native (Expo)** apps, packaged as a Claude Code plugin called `rn-ways-of-working`. One source of truth for how I want Claude to write code across my small indie apps, the same way [`wow`](https://github.com/stuart-collinson/wow) is for my Next.js work. A repo enables one or the other, never both.
 
-The stack it assumes: **Expo + Expo Router · gluestack-ui v3 + NativeWind · Zustand · React Hook Form + Zod · TanStack Query** on the app, a **Node/Express + Supabase** API behind it, and **pnpm** everywhere.
+The stack it assumes, at no monthly cost: **Expo (current SDK) + Expo Router with native tabs · Uniwind (Tailwind v4) + React Native Reusables + Expo UI · TanStack Query · Zustand · React Hook Form + Zod · Supabase (one free project per app, RLS, a few Edge Functions) · RevenueCat · AdMob · Expo push · pnpm.** No API server, no analytics vendors, no web.
 
 If you stumbled on this, feel free to poke around, but the opinions in here are mine.
 
-## What's in it
+## Before you start an app
 
-| Part | What it does |
-|---|---|
-| `gates/` | The standards themselves — seven markdown files, listed below. Loaded in full into every session of a repo that uses this plugin. |
-| `skills/` | Slash commands: `/commit`, `/implement-code`, `/review-code`. |
-| `agents/` | `security-reviewer`, a specialist I can delegate heavier audits to. |
-| `hooks/` + `scripts/` | A `SessionStart` check that confirms the gates are loaded and warns loudly when they are not. |
+### 1. Accounts
 
-### The gates
+| Account | Cost | When |
+|---|---|---|
+| Apple Developer Program | $99/year | Always. App Store, TestFlight, Sign in with Apple, push keys. |
+| Google Play Console | $25 once | Always. A new personal account runs a closed test with 12 testers for 14 days before its first production release. |
+| GitHub | Free | Always. Private app repos, CI, and the public `app-sites` repo for store pages. |
+| Expo | Free | Always. `eas submit`, credentials, EAS Update, the Supabase integration command. |
+| Supabase | Free for two apps | Always. One project per app. App three means Pro ($25/month plus $10/month per extra project) or a second account or organisation. |
+| Google Cloud project | Free | Always. OAuth client IDs for Google sign-in, under your existing Google account. |
+| RevenueCat | Free to $2.5K/month revenue, then 1% | Only when an app sells something. Apple's paid-apps agreement and bank details too. |
+| Google AdMob | Free | Only when an app shows ads. |
+| Firebase project | Free | Only when an app sends push to Android (FCM credentials for Expo's push service). |
 
-| Gate | Covers |
-|---|---|
-| `coding-standards.md` | Universal TS style — `type` not `interface`, arrow functions, guard clauses, no `any`, immutability, naming, near-zero comments, Zod validation |
-| `project-structure.md` | The pnpm monorepo (`apps/mobile`, `apps/api`, `packages/shared`) and the Expo Router app layout |
-| `frontend-patterns.md` | RN + Expo Router, gluestack + NativeWind styling, navigation & auth gate, Zustand / RHF, lists, performance, a11y |
-| `tanstack-query.md` | The data layer — `lib/api/` ↔ `hooks/<domain>/` split, the shared API client, query keys, caching, `queryOptions`, mutations & invalidation, polling, infinite-list pagination, prefetch |
-| `backend-patterns.md` | Node/Express + Supabase, the four-layer split (routes → controller → service → repository), response envelope, auth |
-| `database-standards.md` | Supabase migrations (idempotent, append-only), RLS, schema conventions, indexes |
-| `security-standards.md` | Mobile threat model — no secrets in the bundle, SecureStore, server-side authz, deep-link validation |
+Not needed: Hono, AWS, Cloudflare, Resend, Sentry, PostHog, Vercel.
 
-`gates/ROUTING.md` says which gates apply to which kind of task. `gates/GATES.md` is the entry point that imports all of them — it is the file consuming repos point at.
+### 2. Tools on the Mac
 
-## How the gates get into a session
+Node 22+, pnpm, Xcode and Android Studio, Docker Desktop (runs Supabase locally), the Supabase CLI, `gh`. The EAS CLI runs through `npx eas-cli`.
 
-Two things happen when Claude Code starts in a repo that uses this plugin:
+### 3. Enable the plugin in the new repo
 
-1. **The repo's own `CLAUDE.md` imports the gates.** One line, `@~/.claude/plugins/marketplaces/rn-ways-of-working/gates/GATES.md`, points at the plugin's entry file in the marketplace cache. Claude Code expands `@` imports at launch with no size limit, so every gate arrives in full. Because the line lives in the repo, only that repo gets these gates — a Next.js repo importing `wow` never sees them.
-2. **The plugin's `SessionStart` hook checks the import is there.** If it is, it says so in a line. If it isn't, or the file it points at is missing, it prints a loud warning with the exact line to add.
-
-The gates deliberately do **not** travel through the hook. Claude Code caps a hook's `additionalContext` at 10,000 characters; anything larger is replaced by a file path and a 2 KB preview, with no error. These gates are ~99,000 characters. Until version 1.0.0 the hook shipped all of them, and every session silently received the first thousand characters of `coding-standards` and nothing else.
-
-## Use it in a new project
-
-Two files to add to the new repo, then one session to approve things. Takes a minute.
-
-### 1. Enable the plugin — `.claude/settings.json`
+`.claude/settings.json`:
 
 ```json
 {
@@ -58,11 +46,7 @@ Two files to add to the new repo, then one session to approve things. Takes a mi
 }
 ```
 
-This gives the repo the skills, the agent and the hook, and keeps them updated whenever this plugin's version changes.
-
-### 2. Import the gates — `CLAUDE.md`
-
-Add this to the repo's `CLAUDE.md`, creating the file if there isn't one:
+`CLAUDE.md`, with the import line outside any code block:
 
 ```markdown
 ## Engineering standards
@@ -72,36 +56,47 @@ The `rn-ways-of-working` gates load in full through this import. They are rules,
 @~/.claude/plugins/marketplaces/rn-ways-of-working/gates/GATES.md
 ```
 
-The `~` path is where Claude Code keeps the marketplace clone on every machine, so the line is safe to commit. Keep it outside any code block — Claude Code ignores imports inside backticks.
+Start `claude` in the repo and accept the two prompts (install the plugin, approve the external import), then start a new session. The hook's startup line should say the gates are loaded in full; if it says `WARNING`, it tells you what to fix.
 
-### 3. Open Claude Code and accept two prompts
+### 4. Run `/new-app`
 
-Start `claude` in the repo. The first time on a machine you'll be asked to:
+It asks for the app name, hosted or local-only Supabase, and which modules you want (payments, ads, push), then scaffolds the skeleton as the first commit and writes a first-real-app checklist into the app's README.
 
-- **Install the plugin** that `.claude/settings.json` enables. Accept.
-- **Approve the external import.** The `CLAUDE.md` line points outside the working directory, and Claude Code asks once per project before loading it. Accept.
+## What's in it
 
-Then start a new session, because imports are expanded at launch.
+| Part | What it does |
+|---|---|
+| `gates/` | The standards — eight markdown files, loaded in full into every session of a repo that uses this plugin. |
+| `skills/` | `/new-app`, `/commit`, `/implement-code`, `/review-code`. |
+| `agents/` | `security-reviewer`, for heavier audits. |
+| `hooks/` + `scripts/` | A `SessionStart` check that confirms the gates are loaded and warns loudly when they are not. |
 
-### 4. Check it worked
+### The gates
 
-The hook's startup context should begin `React Native engineering standards — rn-ways-of-working` and say the gates are loaded in full. If it begins `WARNING — rn-ways-of-working gates are NOT loaded`, the message says exactly what to fix.
+| Gate | Covers |
+|---|---|
+| `coding-standards.md` | Universal TS style — `type` not `interface`, arrow functions, guard clauses, no `any`, immutability, naming, near-zero comments, Zod at boundaries |
+| `project-structure.md` | One private repo per app: `app/` routes, `src/` code, `supabase/` at root, the public `app-sites` repo |
+| `frontend-patterns.md` | Expo Router with native tabs and the auth gate, Expo UI versus Tailwind, Uniwind + Reusables, forms, lists, adaptive iPad layouts, accessibility |
+| `tanstack-query.md` | The data layer — `lib/api/` fetchers on supabase-js, cache files, hooks, mutations, the persisted cache, pagination, prefetch, `app_config` |
+| `database-standards.md` | Migrations (idempotent, append-only), RLS, schema conventions, functions and jobs, the skeleton schema |
+| `edge-functions.md` | The little server code: when a function is justified, the portability rule, verifying callers, webhooks, push, Hono as the graduation path |
+| `security-standards.md` | The mobile threat model — publishable versus secret keys, session storage, RLS as the floor, deep links, ads consent, webhooks |
+| `store-and-monetisation.md` | RevenueCat, AdMob with the `app_config` kill switch, push, review prompts, account deletion, store pages, release and EAS Update policy |
 
-For a real check, ask the session something only a gate answers — *"what does the database-standards gate say about RLS in migrations?"* — and it should answer without reading any files.
+`gates/ROUTING.md` says which gates apply to which task. `gates/GATES.md` imports all of them and is the file consuming repos point at. The gates travel through that import, never through the hook: Claude Code caps a hook's context at 10,000 characters and the gates are about 100,000.
 
-Commit `.claude/settings.json` and `CLAUDE.md`. The next clone of the repo, on any machine, needs only step 3.
+## First real app checklist
+
+Things only a human with live accounts can finish, once per app: Google and Apple sign-in against the hosted project (Apple needs a physical device), the Google `iosUrlScheme`, push credentials via `eas credentials`, RevenueCat sandbox purchases, the three `app-sites` URLs entered in App Store Connect and the Play Console, and Google's closed test.
 
 ## Updating the gates
 
-1. Edit the gate file in `gates/`.
+1. Edit the gate file in `gates/`. Keep the total near 100,000 characters (`wc -c gates/*.md`).
 2. Bump `version` in `.claude-plugin/plugin.json` — patch for tweaks, minor for new content, major for anything consumers must act on.
-3. Commit and push.
+3. Commit and push. Consuming repos pick the new version up on their next session via `autoUpdate`.
 
-Consuming repos pick the new version up on their next session via `autoUpdate`, and the import reads from the refreshed cache, so the new text is live immediately.
-
-### Adding a gate
-
-Create the file under `gates/`, add an `@name.md` line to `gates/GATES.md`, and add it to `gates/ROUTING.md`. A gate missing from `GATES.md` is a gate nobody gets.
+Adding a gate: create the file under `gates/`, add an `@name.md` line to `gates/GATES.md`, add it to `gates/ROUTING.md`. A change that adds or removes a vendor or account also updates the table above and `/new-app`.
 
 ## Layout
 
@@ -112,10 +107,10 @@ Create the file under `gates/`, add an `@name.md` line to `gates/GATES.md`, and 
 gates/
 ├── GATES.md              # entry point: imports every gate; consuming repos import this file
 ├── ROUTING.md            # which gates apply to which task
-└── *.md                  # the gates
+└── *.md                  # the eight gates
 hooks/hooks.json          # wires check-gates.mjs into SessionStart
 scripts/check-gates.mjs   # confirms the import is in place; warns if not; never carries gate text
-skills/                   # /commit, /implement-code, /review-code
+skills/                   # /new-app (+ files/ it copies), /commit, /implement-code, /review-code
 agents/                   # security-reviewer
 CLAUDE.md                 # notes for Claude when working on this repo itself
 ```
