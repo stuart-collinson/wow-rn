@@ -167,7 +167,7 @@ Substring search (`ILIKE '%term%'`) wants a `pg_trgm` GIN index and a minimum se
 
 ## The Skeleton Schema
 
-Every app starts with five migrations, written into `supabase/migrations/` by `/new-app`. They are the worked example of every rule above, and the tables other gates rely on.
+Every app's first five migrations are this skeleton. They are the worked example of every rule above, and the tables other gates rely on.
 
 | Migration | Holds |
 |---|---|

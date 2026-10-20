@@ -58,16 +58,16 @@ The `rn-ways-of-working` gates load in full through this import. They are rules,
 
 Start `claude` in the repo and accept the two prompts (install the plugin, approve the external import), then start a new session. The hook's startup line should say the gates are loaded in full; if it says `WARNING`, it tells you what to fix.
 
-### 4. Run `/new-app`
+### 4. Scaffold the app
 
-It asks for the app name, hosted or local-only Supabase, and which modules you want (payments, ads, push), then scaffolds the skeleton as the first commit and writes a first-real-app checklist into the app's README.
+The scaffolding recipe is a local skill, `/new-app`, kept in the first app repo ([Pursey](https://github.com/stuart-collinson/Pursey), `.claude/skills/new-app/`) rather than in this plugin, so it never adds to a session's context. Copy that folder into the new repo's `.claude/skills/` and run `/new-app`. It asks for the app name, hosted or local-only Supabase, and which modules you want (payments, ads, push), then scaffolds the skeleton as the first commit and writes a first-real-app checklist into the app's README.
 
 ## What's in it
 
 | Part | What it does |
 |---|---|
 | `gates/` | The standards — eight markdown files, loaded in full into every session of a repo that uses this plugin. |
-| `skills/` | `/new-app`, `/commit`, `/implement-code`, `/review-code`. |
+| `skills/` | `/commit`, `/implement-code`, `/review-code`. |
 | `agents/` | `security-reviewer`, for heavier audits. |
 | `hooks/` + `scripts/` | A `SessionStart` check that confirms the gates are loaded and warns loudly when they are not. |
 
@@ -96,7 +96,7 @@ Things only a human with live accounts can finish, once per app: Google and Appl
 2. Bump `version` in `.claude-plugin/plugin.json` — patch for tweaks, minor for new content, major for anything consumers must act on.
 3. Commit and push. Consuming repos pick the new version up on their next session via `autoUpdate`.
 
-Adding a gate: create the file under `gates/`, add an `@name.md` line to `gates/GATES.md`, add it to `gates/ROUTING.md`. A change that adds or removes a vendor or account also updates the table above and `/new-app`.
+Adding a gate: create the file under `gates/`, add an `@name.md` line to `gates/GATES.md`, add it to `gates/ROUTING.md`. A change that adds or removes a vendor or account also updates the table above and the `/new-app` recipe in Pursey.
 
 ## Layout
 
@@ -110,7 +110,7 @@ gates/
 └── *.md                  # the eight gates
 hooks/hooks.json          # wires check-gates.mjs into SessionStart
 scripts/check-gates.mjs   # confirms the import is in place; warns if not; never carries gate text
-skills/                   # /new-app (+ files/ it copies), /commit, /implement-code, /review-code
+skills/                   # /commit, /implement-code, /review-code
 agents/                   # security-reviewer
 CLAUDE.md                 # notes for Claude when working on this repo itself
 ```

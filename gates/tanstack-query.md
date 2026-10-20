@@ -48,7 +48,7 @@ src/
 
 ## 0a. What's set up ONCE vs. what repeats
 
-Most of this gate is the **per-domain shape that repeats**. A small **foundation is wired a single time** when the app is stood up (`/new-app` does it), then left alone: `lib/supabase.ts`, `lib/storage.ts`, `lib/queryClient.ts` (§2), the root `PersistQueryClientProvider` mount plus the `focusManager` / `onlineManager` wiring (§2a–§3), `lib/api/dataError.ts` (§4), `lib/prefetch.ts` (§11) and `lib/time.ts` (§5b).
+Most of this gate is the **per-domain shape that repeats**. A small **foundation is wired a single time** when the app is scaffolded, then left alone: `lib/supabase.ts`, `lib/storage.ts`, `lib/queryClient.ts` (§2), the root `PersistQueryClientProvider` mount plus the `focusManager` / `onlineManager` wiring (§2a–§3), `lib/api/dataError.ts` (§4), `lib/prefetch.ts` (§11) and `lib/time.ts` (§5b).
 
 Everything else — `lib/api/<domain>.ts`, `hooks/<domain>/<domain>.cache.ts`, the `use*` hooks, `prefetch<Domain>Queries.ts` — is **per domain** and is copy-paste-and-rename. If you find yourself editing a foundation file to add a domain, stop: the shape has drifted.
 

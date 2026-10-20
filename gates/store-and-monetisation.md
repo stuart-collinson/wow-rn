@@ -1,6 +1,6 @@
 # Store & Monetisation
 
-What it takes to be on both stores and make money at no monthly cost. Payments, ads and push are **optional modules**: a section marked *(when enabled)* applies only to an app that turned that module on in `/new-app`; an app without it must still pass every other rule here.
+What it takes to be on both stores and make money at no monthly cost. Payments, ads and push are **optional modules**: a section marked *(when enabled)* applies only to an app that turned that module on when it was scaffolded; an app without it must still pass every other rule here.
 
 ## Payments — RevenueCat *(when enabled)*
 

@@ -2,7 +2,7 @@
 
 The shape of a React Native project: **one git repo per app**, holding an Expo app, that app's Supabase project, and nothing else. No workspace, no monorepo, no API server. `pnpm` is the package manager — never `npm`, `yarn` or `bun`. Every install is `pnpm add`, every script is `pnpm <script>`.
 
-Shared code does not travel between apps as a package; it arrives through the `/new-app` skill's recipe and reference files, and these gates keep every app the same shape.
+Shared code does not travel between apps as a package; every app is scaffolded to the same skeleton, and these gates keep every app the same shape.
 
 ## Repo Layout
 
@@ -88,7 +88,7 @@ supabase/functions/revenuecat-webhook/index.ts   # Edge Functions — kebab-case
 
 ## `supabase/` lives at the repo root
 
-The Supabase CLI operates on the `supabase/` directory in the current working directory, so it lives at the **repo root** — that's what makes `supabase start` / `supabase db reset` / `supabase db push` work without any `--workdir` juggling. Each app has **one hosted Supabase project** (free plan) and runs the **local stack via Docker** for development; there is no hosted staging project. Run all `supabase` commands from the repo root, and wrap the common ones as `package.json` scripts. Every app has the same script names: `dev`, `typecheck`, `lint`, `test`, `db:start`, `db:reset`, `db:push`, `db:types`, `build:ios`, `build:android`, `submit:ios`, `submit:android` (`/new-app` writes them). The migration workflow lives in `database-standards`; the functions layout in `edge-functions`; the release path in `store-and-monetisation`.
+The Supabase CLI operates on the `supabase/` directory in the current working directory, so it lives at the **repo root** — that's what makes `supabase start` / `supabase db reset` / `supabase db push` work without any `--workdir` juggling. Each app has **one hosted Supabase project** (free plan) and runs the **local stack via Docker** for development; there is no hosted staging project. Run all `supabase` commands from the repo root, and wrap the common ones as `package.json` scripts. Every app has the same script names: `dev`, `typecheck`, `lint`, `test`, `db:start`, `db:reset`, `db:push`, `db:types`, `build:ios`, `build:android`, `submit:ios`, `submit:android`. The migration workflow lives in `database-standards`; the functions layout in `edge-functions`; the release path in `store-and-monetisation`.
 
 ## The `app-sites` repo
 
@@ -103,7 +103,7 @@ app-sites/
     └── delete-account.md   # Play Console account-deletion URL; explains the in-app path
 ```
 
-`/new-app` adds the folder and creates the repo if it is missing.
+The folder is added when the app is scaffolded; the repo is created once, the first time.
 
 ## Path Aliases
 
