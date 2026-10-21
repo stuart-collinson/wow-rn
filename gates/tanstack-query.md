@@ -326,9 +326,7 @@ A mutation hook owns the write and the cache reconciliation that follows it. Pre
 
 ## 9. Polling with `refetchInterval`
 
-Some queries track an async server-side process and must poll until it reaches a terminal state. `refetchInterval` belongs in the **hook**, never in a `queryOptions` factory — it's a runtime view concern, not a cache definition.
-
-In the hook: `refetchInterval: (query) => isInProgress(query.state.data?.status) ? POLL_INTERVAL : false`, with `POLL_INTERVAL` a named constant at the top of the file. Callback form, not a bare number; the terminal-state condition caps the poll. Polling is for genuine async server work only — for user-triggered refreshes use pull-to-refresh (`refetch`).
+Only for an async server-side process that must reach a terminal state. `refetchInterval` goes in the **hook**, never the `queryOptions` factory, in callback form so the terminal state stops it: `refetchInterval: (query) => isInProgress(query.state.data?.status) ? POLL_INTERVAL : false`. User-triggered refreshes are pull-to-refresh (`refetch`).
 
 ### 9a. Realtime — optional, per domain
 
@@ -388,13 +386,3 @@ Consumers read `config?.ads_enabled === true` — a missing row, a failed fetch,
 
 - **Sub-resources:** a domain spanning several gets `hooks/<domain>/<sub>/`, mirrored as `lib/api/<domain>/<sub>.ts`; the domain-root files stay at the root. Cross-cutting hooks (`useDebounce`) stay flat in `hooks/`. No `index.ts` barrel anywhere.
 - **Comments:** hooks, prefetch files and fetchers have none; `<domain>.cache.ts` may carry one for non-obvious cache reasoning. Narrow errors with `error instanceof DataError`, never `as any`.
-
----
-
-## Adopt on a new domain — checklist
-
-1. The singular type file (`types/workout.types.ts`): `<Domain>Row`, `<DOMAIN>_COLUMNS`, the `camelCase` type, `to<Domain>(row)`.
-2. `lib/api/<domain>.ts`: one query per operation, explicit columns, `unwrap`/`assertOk`, the mapper; `fetch<Domain>` / `fetch<Domain>s` reads, `<verb><Domain>Request` writes; no `user_id` filters, no `try`/`catch`, no comments.
-3. `hooks/<domain>/<domain>.cache.ts`: key factory, `STALE_TIMES`, a `queryOptions`/`infiniteQueryOptions` factory per read.
-4. `hooks/<domain>/use*.ts`: one export per file, spreading the factory, `enabled` guards.
-5. Mutations invalidate the narrowest prefix (or `setQueryData` with an authoritative value); keyset pagination + `useInfiniteQuery`; `prefetch<Domain>Queries.ts` + one line in `lib/prefetch.ts`; no barrel; polling and Realtime only when the data needs them.

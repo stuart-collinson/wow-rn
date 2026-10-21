@@ -115,14 +115,7 @@ updated_at  timestamptz NOT NULL DEFAULT now()
 
 ### Types
 
-| Use | Not |
-|---|---|
-| `uuid` for IDs | `serial` / `bigint` (sequential IDs leak record counts) |
-| `text` for strings | `varchar(N)` (no perf difference) |
-| `timestamptz` for times | `timestamp` (loses zone info) |
-| `jsonb` for genuinely-variable blobs | `json`; and don't use jsonb when columns would do |
-| `numeric` for money | `float` / `real` |
-| `boolean` | `int` with 0/1 |
+`uuid` ids (sequential ids leak record counts), `text` not `varchar(N)`, `timestamptz` not `timestamp`, `numeric` for money, `boolean` not 0/1, and `jsonb` only for genuinely variable blobs — columns when columns would do.
 
 ### Constraints
 
@@ -139,6 +132,7 @@ RLS is the **primary authorisation mechanism** — there is no API in front of t
 - **Policies are per action and per role** — separate `SELECT`, `INSERT`, `UPDATE`, `DELETE` where the rules differ, and name the role (`TO authenticated`, `TO anon, authenticated`). A row a user can read isn't necessarily one they can update.
 - **Compare with `(SELECT auth.uid())`**, not bare `auth.uid()` — the subselect is evaluated once per query instead of once per row.
 - **Policy names describe the rule** in plain language — `"users manage own workouts"`. The name shows up in errors and the dashboard.
+- **A user never writes what grants them something.** Plan, role, credits and the like live in their own table with a SELECT-own policy and no write policies; only a webhook or a `SECURITY DEFINER` function writes it. `FOR ALL` own-row policies are for data the user fully owns.
 - **The secret key bypasses RLS** — it exists only inside Edge Functions (`edge-functions`) for jobs that genuinely span users, never as a workaround for a missing policy.
 - **Test under both anon and authenticated.** Anon should typically see nothing (except `app_config`); an authenticated user should see only their own rows.
 

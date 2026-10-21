@@ -12,7 +12,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 │   ├── _layout.tsx             # Root layout: the providers; renders AppShell, which holds the auth gate
 │   ├── (auth)/
 │   │   ├── _layout.tsx
-│   │   └── sign-in.tsx         # Apple + Google buttons
+│   │   └── sign-in.tsx         # Apple (iOS) + Google buttons, and why an account is needed
 │   ├── (tabs)/
 │   │   ├── _layout.tsx         # NativeTabs
 │   │   ├── index.tsx           # Home tab
@@ -20,6 +20,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 │   │       ├── _layout.tsx     # Stack — a tab that pushes screens needs its own
 │   │       ├── index.tsx       # /workouts list
 │   │       └── [id].tsx        # /workouts/:id
+│   ├── +native-intent.tsx      # maps the OAuth redirect path to / (see security-standards)
 │   └── +not-found.tsx
 ├── src/
 │   ├── components/             # UI components, each in its own folder (see below)
@@ -115,16 +116,11 @@ app-sites/
 └── <app-slug>/
     ├── privacy.md          # App Store Connect + Play Console privacy policy URL
     ├── support.md          # App Store Connect support URL
-    └── delete-account.md   # Play Console account-deletion URL; explains the in-app path
+    └── delete-account.md   # Play Console account-deletion URL; the in-app path and an email route
 ```
 
 The folder is added when the app is scaffolded; the repo is created once, the first time.
 
 ## Path Aliases
 
-Import via the `@/` alias (`@/*` → `src/*` in `tsconfig.json`), never deep relative paths, so a reader can locate the source without tracing `../../`. Route files import from `src/` the same way.
-
-```typescript
-import { useSession } from '@/hooks/useSession'
-import { Button } from '@/components/ui/button'
-```
+Import via the `@/` alias (`@/*` → `src/*` in `tsconfig.json`) — `import { useSession } from '@/hooks/useSession'` — never deep relative paths. Route files import from `src/` the same way.

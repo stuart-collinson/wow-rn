@@ -12,12 +12,12 @@ If you stumbled on this, feel free to poke around, but the opinions in here are 
 
 | Account | Cost | When |
 |---|---|---|
-| Apple Developer Program | $99/year | Always. App Store, TestFlight, Sign in with Apple, push keys. |
+| Apple Developer Program | $99/year | Always. App Store, TestFlight, Sign in with Apple (plus its `.p8` key, so account deletion can revoke tokens), push keys. |
 | Google Play Console | $25 once | Always. A new personal account runs a closed test with 12 testers for 14 days before its first production release. |
 | GitHub | Free | Always. Private app repos, CI, and the public `app-sites` repo for store pages. |
 | Expo | Free | Always. `eas submit`, credentials, EAS Update, the Supabase integration command. |
 | Supabase | Free for two apps | Always. One project per app. App three means Pro ($25/month plus $10/month per extra project). Free projects pause after a week without activity; restore them from the dashboard. |
-| Google Cloud project | Free | Always. OAuth client IDs for Google sign-in: web, iOS, and an Android client carrying the keystore SHA-1 from `eas credentials`. Under your existing Google account. |
+| Google Cloud project | Free | Always. One web OAuth client for Google sign-in, its ID and secret entered in Supabase (Auth → Providers → Google). Under your existing Google account. |
 | RevenueCat | Free to $2.5K/month revenue, then 1% | Only when an app sells something. Apple's paid-apps agreement and bank details too. |
 | Google AdMob | Free | Only when an app shows ads. |
 | Firebase project | Free | Only when an app sends push to Android (FCM credentials for Expo's push service). |
@@ -82,7 +82,7 @@ Headless runs (`claude -p`, CI) never show the prompt, so answer it interactivel
 | `frontend-patterns.md` | Expo Router with native tabs and the auth gate, Expo UI versus Tailwind, Uniwind + Reusables, forms, lists, adaptive iPad layouts, accessibility |
 | `tanstack-query.md` | The data layer — `lib/api/` fetchers on supabase-js, cache files, hooks, mutations, the persisted cache, pagination, prefetch, `app_config` |
 | `database-standards.md` | Migrations (idempotent, append-only), RLS, schema conventions, functions and jobs, the skeleton schema |
-| `edge-functions.md` | The little server code: when a function is justified, the portability rule, verifying callers, webhooks, push, Hono as the graduation path |
+| `edge-functions.md` | The little server code: when a function is justified, the portability rule, verifying callers, webhooks, Apple token revocation, push |
 | `security-standards.md` | The mobile threat model — publishable versus secret keys, session storage, RLS as the floor, deep links, ads consent, webhooks |
 | `store-and-monetisation.md` | RevenueCat, AdMob with the `app_config` kill switch, push, review prompts, account deletion, store pages, release and EAS Update policy |
 
@@ -90,7 +90,7 @@ Headless runs (`claude -p`, CI) never show the prompt, so answer it interactivel
 
 ## First real app checklist
 
-Things only a human with live accounts can finish, once per app: Google and Apple sign-in against the hosted project (Apple needs a physical device), the Google `iosUrlScheme` and the Android client's SHA-1, account deletion tested end to end from the settings screen, push credentials via `eas credentials`, RevenueCat sandbox purchases, the three `app-sites` URLs entered in App Store Connect and the Play Console, and Google's closed test.
+Things only a human with live accounts can finish, once per app: Google and Apple sign-in against the hosted project (Apple needs a physical device), the `auth/callback` redirect URL in Supabase's Redirect URLs, the Sign in with Apple key in Edge Function secrets, account deletion tested end to end from the settings screen (Apple revoke included), push credentials via `eas credentials`, RevenueCat sandbox purchases, the three `app-sites` URLs entered in App Store Connect and the Play Console, and Google's closed test.
 
 ## Updating the gates
 

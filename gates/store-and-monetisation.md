@@ -4,11 +4,11 @@ What it takes to be on both stores and make money at no monthly cost. Payments, 
 
 ## Payments — RevenueCat *(when enabled)*
 
-- **Configure once at app start** in `lib/purchases.ts`: `configurePurchases()` calls `Purchases.configure({ apiKey })` with the platform's public SDK key from `env` (`EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`). After sign-in, `Purchases.logIn(session.user.id)` so entitlements follow the Supabase user across devices; `Purchases.logOut()` runs in sign-out (`tanstack-query` §2a).
+- **Configure once the session exists** in `lib/purchases.ts`: `configurePurchases(userId)` calls `Purchases.configure({ apiKey, appUserID: userId })` with the platform's public SDK key from `env` (`EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`), so a purchase never sits on an anonymous RevenueCat id and entitlements follow the Supabase user across devices. A later user switch is `Purchases.logIn(userId)`; `Purchases.logOut()` runs in sign-out (`tanstack-query` §2a).
 - **`useEntitlements()`** (`hooks/useEntitlements.ts`) is the only place the app reads purchase state: `getCustomerInfo()` on mount plus `addCustomerInfoUpdateListener`, returning `{ isPro, isLoading }` where `isPro = Boolean(customerInfo.entitlements.active['pro'])`. The RevenueCat SDK is the cache — this is not a TanStack query, and `isPro` is never mirrored into Zustand.
-- **The paywall is RevenueCat's.** Gate an action with `RevenueCatUI.presentPaywallIfNeeded({ requiredEntitlementIdentifier: 'pro' })`; the paywall itself is designed in the RevenueCat dashboard and changes without a release.
+- **The paywall is RevenueCat's.** Gate an action with `RevenueCatUI.presentPaywallIfNeeded({ requiredEntitlementIdentifier: 'pro' })`; the paywall itself is designed in the RevenueCat dashboard and changes without a release. Its footer links Apple's standard Terms of Use (`https://www.apple.com/legal/internet-services/itunes/dev/stdeula/`) and the app's privacy page, and the App Store description carries both links; guideline 3.1.2 rejects a subscription without them.
 - **Restore purchases is always visible** — on the paywall and in settings — calling `Purchases.restorePurchases()`. Apple rejects apps without it.
-- **No server by default.** Only when a server-side decision needs the plan does the `revenuecat-webhook` Edge Function (`edge-functions`) land events in a `subscription_event` table. The client never trusts its own `isPro` for anything a server could check.
+- **No server by default.** When a server-side decision needs the plan, the `revenuecat-webhook` Edge Function (`edge-functions`) calls `apply_entitlement_event()` (`SECURITY DEFINER`, `EXECUTE` for `service_role` only, or any user could grant themselves the plan), which upserts the user's `entitlement` row (`user_id`, `entitlement`, `expires_at`, `event_at`; primary key `(user_id, entitlement)`) and ignores an event older than the row's `event_at`. The table is SELECT-own with no write policies (`database-standards` → RLS); policies and RPCs check `public.has_entitlement('pro')`, a `STABLE SECURITY DEFINER` function true while the caller's row has `expires_at > now()`. The client's `isPro` is UX only.
 - Needs a development build (native module); no config plugin. Free until $2,500 a month of tracked revenue, then 1%.
 
 ## Ads — AdMob *(when enabled)*
@@ -32,7 +32,13 @@ What it takes to be on both stores and make money at no monthly cost. Payments, 
 
 ## Account deletion
 
-Required by both stores. Settings → "Delete account" → a confirm dialog → `deleteMyAccountRequest()` (`lib/api/account.ts`, `supabase.rpc('delete_my_account')`) → the sign-out path (`tanstack-query` §2a) → the auth gate flips. Tell the user that an active subscription is cancelled in the App Store or Play Store settings, with a link, because no app can cancel it for them. An app with uploads first lists the user's `<user id>/` folder and removes it with `supabase.storage.from(bucket).remove(paths)` (`deleteMyFilesRequest()` in the same file); Supabase rejects a SQL delete from `storage.objects`. The `delete-account.md` page in `app-sites` explains the same path for Google Play's deletion-request URL.
+Required by both stores. Settings → "Delete account" → a confirm dialog → then, from `lib/api/account.ts`:
+
+1. **An Apple user** (`session.user.app_metadata.providers` includes `apple`) signs in with Apple once more for a fresh `authorizationCode`, sent to the `revoke-apple-token` Edge Function. Apple requires the revoke; if it fails, log it and carry on.
+2. **An app with uploads** lists the user's `<user id>/` folder and removes it with `supabase.storage.from(bucket).remove(paths)`; Supabase rejects a SQL delete from `storage.objects`.
+3. `deleteMyAccountRequest()` (`supabase.rpc('delete_my_account')`), then the sign-out path (`tanstack-query` §2a), and the auth gate flips.
+
+Tell the user that an active subscription is cancelled in the App Store or Play Store settings, with a link, because no app can cancel it for them. The `delete-account.md` page in `app-sites` explains the in-app path and gives an email route for anyone without the app, which Google Play requires; handle those by hand within 30 days, deleting the user and their Storage folder in the dashboard.
 
 ## Store pages
 
@@ -40,7 +46,7 @@ Each app has three Markdown pages in the public `app-sites` repo (`project-struc
 
 ## Required app config
 
-`app.json` for every app: `version` (semver, bumped per store release), `scheme`, `ios.bundleIdentifier` and `android.package`, `ios.supportsTablet: true`, `ios.usesAppleSignIn: true`, `ios.appStoreUrl` and `android.playStoreUrl` once the listings exist (`StoreReview.storeUrl()` returns `null` without them), `userInterfaceStyle: "automatic"`, `experiments.typedRoutes: true`, `experiments.reactCompiler: true`, `runtimeVersion: { "policy": "fingerprint" }` with `updates.url` written by `eas update:configure`, and plugins for `expo-router`, `expo-sqlite`, `expo-apple-authentication`, `@react-native-google-signin/google-signin` (with `iosUrlScheme`), plus `expo-notifications` (with `android.googleServicesFile`), `react-native-google-mobile-ads` and `expo-tracking-transparency` when those modules are on. Expo generates the iOS privacy manifest from plugins; a library that asks for a "required reason" entry gets it under `ios.privacyManifests`.
+`app.json` for every app: `version` (semver, bumped per store release), `scheme`, `ios.bundleIdentifier` and `android.package`, `ios.supportsTablet: true`, `ios.usesAppleSignIn: true`, `ios.appStoreUrl` and `android.playStoreUrl` once the listings exist (`StoreReview.storeUrl()` returns `null` without them), `userInterfaceStyle: "automatic"`, `experiments.typedRoutes: true`, `experiments.reactCompiler: true`, `runtimeVersion: { "policy": "fingerprint" }` with `updates.url` written by `eas update:configure`, and plugins for `expo-router`, `expo-sqlite`, `expo-apple-authentication`, plus `expo-notifications` (with `android.googleServicesFile`), `react-native-google-mobile-ads` and `expo-tracking-transparency` when those modules are on. Expo generates the iOS privacy manifest from plugins; a library that asks for a "required reason" entry gets it under `ios.privacyManifests`.
 
 ## Minimum supported version
 

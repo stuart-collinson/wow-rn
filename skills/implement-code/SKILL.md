@@ -58,11 +58,12 @@ Write the code. Use this checklist before outputting each file:
 
 **Database**
 - [ ] Migration is idempotent (`IF NOT EXISTS` / `DROP … IF EXISTS` / `DO`-block guards); `pnpm db:check` passes
-- [ ] RLS enabled + per-action policies in the same migration; `snake_case`, singular table name; `user_id DEFAULT auth.uid()`
+- [ ] RLS enabled + per-action policies in the same migration; plan/role/credits in a read-only table; `snake_case`, singular table name; `user_id DEFAULT auth.uid()`
 - [ ] Types regenerated and committed (`pnpm db:types`)
 
 **Security**
 - [ ] Only the publishable key in the app; secrets only in Edge Function secrets
+- [ ] Sign-in is Apple (iOS) + Google in the browser; account deletion revokes Apple, removes uploads, then deletes
 - [ ] Session via the `expo-sqlite` shim (Keychain pattern only for sensitive apps); nothing secret in stores or logs
 - [ ] Deep-link params and `app_config` values Zod-validated; ads only after consent and `ads_enabled`
 

@@ -19,6 +19,13 @@ const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_P
 
 **Checklist:** no secrets in the bundle · publishable key only in the app · secret key only in Edge Functions · legacy key names absent · `.env*` gitignored.
 
+## Sign-in
+
+Apple and Google only, and every app requires it: the sign-in screen says in one line why an account is needed (your data syncs across devices), and the App Review notes say the same. The calls live in `lib/api/auth.ts`.
+
+- **Apple, iOS only:** `AppleAuthentication.signInAsync()` → `supabase.auth.signInWithIdToken({ provider: 'apple', token: credential.identityToken })`. Apple sends the name only on the first sign-in; save it to `profile.display_name` then.
+- **Google, both platforms, in the browser:** `signInWithOAuth({ provider: 'google', options: { redirectTo, skipBrowserRedirect: true } })` → `WebBrowser.openAuthSessionAsync(data.url, redirectTo)` → `exchangeCodeForSession(code)` from the returned URL. `redirectTo` is `Linking.createURL('auth/callback')`, listed in the dashboard's Redirect URLs and `config.toml`'s `additional_redirect_urls`; `app/+native-intent.tsx` maps that path to `/` so Android's copy of the redirect never hits the not-found screen. No native Google SDK: the free one runs on Android sign-in APIs Google has deprecated.
+
 ## Session & device storage
 
 ```typescript
@@ -26,7 +33,7 @@ const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_P
 import 'expo-sqlite/localStorage/install'
 
 export const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
-  auth: { storage: globalThis.localStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+  auth: { storage: globalThis.localStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, flowType: 'pkce' },
 })
 ```
 
@@ -84,15 +91,7 @@ Never compose SQL as a string. Genuine raw-SQL needs go in a Postgres function w
 
 ## Sensitive data exposure
 
-```typescript
-// FAIL — logging a token or a whole payload (device logs are captured by store crash reports)
-console.log('session', session)
-
-// PASS — shaped, redacted
-console.log('[auth][signed-in]', { userId })
-```
-
-- No passwords, tokens, or keys in logs. Scrub PII before logging anything.
+- Log shaped fields — `console.log('[auth][signed-in]', { userId })` — never a session, token, key, password or whole payload; device logs reach store crash reports. Scrub PII first.
 - Error messages shown to the user are generic; detail stays in Edge Function logs. Never surface a stack trace in the app.
 
 ## Flag Immediately

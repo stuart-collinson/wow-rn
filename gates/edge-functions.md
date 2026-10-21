@@ -9,7 +9,7 @@ A function exists for exactly three reasons. Anything else is a gate failure.
 | Reason | Example | Why the phone can't |
 |---|---|---|
 | **A webhook comes in** | RevenueCat posts a subscription event | the sender needs a URL and a shared secret |
-| **A secret goes out** | calling an LLM, an email API, Expo's push service | the key would ship in the bundle |
+| **A secret goes out** | calling an LLM, an email API, Expo's push service, revoking a Sign in with Apple token | the key would ship in the bundle |
 | **A privileged job** | an admin action, a job that spans users | the user's JWT can't, and shouldn't, do it |
 
 Before writing one, check it isn't Postgres's job (`database-standards` → Functions, Triggers & Jobs): an atomic multi-table write is an RPC, a schedule is `pg_cron`, an outbound call from SQL is `pg_net`. And it is never "an API for the app" — the app reads and writes through `supabase-js` and RLS (`tanstack-query`).
@@ -23,6 +23,8 @@ supabase/functions/
 │   └── <helper>.ts           shared helpers and Zod schemas, Web-standard only
 ├── revenuecat-webhook/
 │   └── index.ts              one function, one folder, index.ts is the entry
+├── revoke-apple-token/
+│   └── index.ts
 └── send-push/
     └── index.ts
 ```
@@ -88,7 +90,7 @@ A webhook handler authenticates the sender, validates the payload, and is idempo
 // supabase/functions/revenuecat-webhook/index.ts
 import { createAdminClient } from 'npm:@supabase/server/core'
 import { getEnv, serve } from '../_shared/runtime.ts'
-import { eventSchema } from '../_shared/revenuecat.ts'   // a Zod schema of the fields you read
+import { eventSchema, toEntitlementEvent } from '../_shared/revenuecat.ts'   // the fields you read, and their RPC parameters
 
 serve(async (request) => {
   if (request.headers.get('Authorization') !== `Bearer ${getEnv('REVENUECAT_WEBHOOK_SECRET')}`) {
@@ -99,8 +101,8 @@ serve(async (request) => {
   if (!parsed.success) return new Response('Bad payload', { status: 400 })
 
   const supabase = createAdminClient()   // a webhook has no caller; writes span users
-  const { error } = await supabase.from('subscription_event').insert({ ... }) // event.id has a UNIQUE index → duplicate deliveries fail loudly
-  if (error && error.code !== '23505') return new Response('Insert failed', { status: 500 })
+  const { error } = await supabase.rpc('apply_entitlement_event', toEntitlementEvent(parsed.data))
+  if (error) return new Response('Update failed', { status: 500 })
 
   return new Response('ok')
 })
@@ -108,8 +110,12 @@ serve(async (request) => {
 
 - **The shared secret is compared on every request**; the URL being obscure is not authentication.
 - **The payload is Zod-validated** before anything reads it; the sender's docs are not a contract.
-- **Idempotency is a UNIQUE index** on the sender's event id (`database-standards`); a redelivery hits `23505` and returns success.
+- **A redelivered or out-of-order event is a no-op**: a UNIQUE index on the sender's event id (`database-standards`), or, for RevenueCat, the `event_at` guard in `apply_entitlement_event()` (`store-and-monetisation`).
 - Respond quickly with 2xx once the event is stored; do slow work from a trigger or `pg_cron`, not inside the webhook.
+
+## Revoking Sign in with Apple
+
+`revoke-apple-token` is called by the signed-in user during account deletion with `{ authorizationCode }`, Zod-validated. It signs a client secret (an ES256 JWT via `npm:jose`, per Apple's docs) from `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (the Sign in with Apple `.p8`) and `APPLE_CLIENT_ID` (the bundle id), exchanges the code at `https://appleid.apple.com/auth/token`, then posts the refresh token to `https://appleid.apple.com/auth/revoke` with `token_type_hint=refresh_token`. A failure is logged and returned as a 502; the app carries on deleting.
 
 ## The push sender
 
@@ -117,14 +123,4 @@ serve(async (request) => {
 
 ## Local run, deploy, logs
 
-```bash
-supabase functions new <name>                       # scaffolds supabase/functions/<name>/index.ts
-supabase functions serve --env-file supabase/functions/.env   # serves every function locally against `supabase start`
-supabase functions deploy <name>                    # deploys one function to the hosted project
-```
-
-Logs are in the dashboard (Functions → Logs). Log shaped fields with a `[function][step]` prefix — `console.log('[send-push][sent]', { userId, count })` — never a token, a secret, a full request body, or a payload with PII. Errors return a generic message to the caller; the detail goes to the log.
-
-## Graduation: Hono
-
-If an app ever needs a real API — business logic too tangled for RPC plus thin functions, or a second client — the answer is **Hono**, which runs on Node, Bun, Deno and Cloudflare Workers with the same Web-standard handlers this gate already mandates. The Zod schemas move across as they are, the handlers become routes, and in the app only `lib/api/` changes (`tanstack-query` → the seam). Traffic alone never justifies it at this scale; Supabase on a bigger compute tier does.
+`supabase functions serve --env-file supabase/functions/.env` runs every function against `supabase start`; `supabase functions deploy <name>` ships one. Logs are in the dashboard (Functions → Logs). Log shaped fields with a `[function][step]` prefix — `console.log('[send-push][sent]', { userId, count })` — never a token, a secret, a full request body, or a payload with PII. Errors return a generic message to the caller; the detail goes to the log.

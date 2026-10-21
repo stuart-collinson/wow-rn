@@ -187,18 +187,9 @@ Reach for `useReducer` when a component has **3+ related state values that trans
 RHF is the single source of truth for form state. Never use Zustand or `useState` for form fields. Zod handles validation via `zodResolver`; the schema lives in `src/schemas/` (`workout.schema.ts`) and its inferred type is the form's type. Because RN inputs are controlled differently from web, use `Controller` to bind Reusables inputs.
 
 ```tsx
-import { useForm, Controller } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { View } from 'react-native'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Text } from '@/components/ui/text'
-import { createWorkoutSchema } from '@/schemas/workout.schema'
-import type { CreateWorkoutInput } from '@/schemas/workout.schema'
-
 const CreateWorkoutForm = ({ onSubmit }: Props) => {
-  const { control, handleSubmit, formState: { errors, isSubmitting } } = useForm<CreateWorkoutInput>({
-    resolver: zodResolver(createWorkoutSchema),
+  const { control, handleSubmit, formState: { errors, isSubmitting } } = useForm({
+    resolver: zodResolver(createWorkoutSchema),   // types come from the schema
   })
 
   return (
