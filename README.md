@@ -12,21 +12,21 @@ If you stumbled on this, feel free to poke around, but the opinions in here are 
 
 | Account | Cost | When |
 |---|---|---|
-| Apple Developer Program | $99/year | Always. App Store, TestFlight, Sign in with Apple (plus its `.p8` key, so account deletion can revoke tokens), push keys. |
-| Google Play Console | $25 once | Always. A new personal account runs a closed test with 12 testers for 14 days before its first production release. |
-| GitHub | Free | Always. Private app repos, CI, and the public `app-sites` repo for store pages. |
+| Apple Developer Program | $99/year | Always. App Store, TestFlight, Sign in with Apple (plus its `.p8` key, so account deletion can revoke tokens), push keys. App Store Connect also needs the EU trader-status declaration, tax forms and, for paid apps, the paid-apps agreement and bank details. |
+| Google Play Console | $25 once | Always. A new personal account runs a closed test with 12 testers for 14 days before its first production release. Target audience 13+, never the Kids category (ads and sign-in assume adults); a payments profile for paid apps. |
+| GitHub | Free | Always. Private app repos, CI, the public `app-sites` repo for store pages and, when an app shows ads, a public `<user>.github.io` repo serving `app-ads.txt` at its root. |
 | Expo | Free | Always. `eas submit`, credentials, EAS Update, the Supabase integration command. |
 | Supabase | Free for two apps | Always. One project per app. App three means Pro ($25/month plus $10/month per extra project). Free projects pause after a week without activity; restore them from the dashboard. |
-| Google Cloud project | Free | Always. One web OAuth client for Google sign-in, its ID and secret entered in Supabase (Auth → Providers → Google). Under your existing Google account. |
-| RevenueCat | Free to $2.5K/month revenue, then 1% | Only when an app sells something. Apple's paid-apps agreement and bank details too. |
-| Google AdMob | Free | Only when an app shows ads. |
+| Google Cloud project | Free | Always. One web OAuth client for Google sign-in, its ID and secret entered in Supabase (Auth → Providers → Google). Publish the OAuth consent screen (In production) — while it says Testing, only listed test users can sign in; the basic scopes need no verification. Under your existing Google account. |
+| RevenueCat | Free to $2.5K/month revenue, then 1% | Only when an app sells something. Connect the App Store (In-App Purchase key, Server Notifications URL) and Google Play (service-account JSON, real-time developer notifications); a secret API key for the webhook. |
+| Google AdMob | Free | Only when an app shows ads. Add payment details, or new apps stay in "getting ready". |
 | Firebase project | Free | Only when an app sends push to Android (FCM credentials for Expo's push service). |
 
 Not needed: Hono, AWS, Cloudflare, Resend, Sentry, PostHog, Vercel.
 
 ### 2. Tools on the Mac
 
-Node 22+, pnpm, Xcode and Android Studio, Docker Desktop (runs Supabase locally), the Supabase CLI, `gh`. The EAS CLI runs through `npx eas-cli`.
+Node 22+, pnpm, Xcode (with CocoaPods and fastlane for local iOS builds) and Android Studio, Docker Desktop (runs Supabase locally), the Supabase CLI, `psql` (`brew install libpq`, for `pnpm db:check`), `gh`. The EAS CLI comes in per app as the `eas-cli` dev dependency.
 
 ### 3. Enable the plugin in the new repo
 
@@ -58,7 +58,7 @@ The `rn-ways-of-working` gates load in full through this import. They are rules,
 
 Then, once per repo:
 
-1. Start `claude` in the repo and accept the prompt to install `rn-ways-of-working`. If no prompt appears, run `claude plugin install rn-ways-of-working@rn-ways-of-working --scope project`.
+1. Start `claude` in the repo and accept the prompt to install `rn-ways-of-working`. If no prompt appears, run `claude plugin marketplace add https://github.com/stuart-collinson/wow-rn.git`, then `claude plugin install rn-ways-of-working@rn-ways-of-working --scope project`.
 2. Answer **Yes** to "Allow external CLAUDE.md file imports?". The highlighted default is **No**, and a No is remembered: the gates never load in that repo and Claude Code never asks again. To undo a No, quit Claude Code, set `"hasClaudeMdExternalIncludesApproved": true` for the repo under `projects` in `~/.claude.json`, and start again.
 3. Start a new session and send any message. If the gates didn't load, the plugin says so and why; silence means they did.
 
@@ -86,15 +86,15 @@ Headless runs (`claude -p`, CI) never show the prompt, so answer it interactivel
 | `security-standards.md` | The mobile threat model — publishable versus secret keys, session storage, RLS as the floor, deep links, ads consent, webhooks |
 | `store-and-monetisation.md` | RevenueCat, AdMob with the `app_config` kill switch, push, review prompts, account deletion, store pages, release and EAS Update policy |
 
-`gates/ROUTING.md` says which gates apply to which task. `gates/GATES.md` imports all of them and is the file consuming repos point at. The gates travel through that import, never through the hook: Claude Code caps a hook's context at 10,000 characters and the gates are about 100,000.
+`gates/ROUTING.md` says which gates apply to which task. `gates/GATES.md` imports all of them and is the file consuming repos point at. The gates travel through that import, never through the hook: Claude Code caps a hook's context at 10,000 characters and the gates are about 110,000.
 
 ## First real app checklist
 
-Things only a human with live accounts can finish, once per app: Google and Apple sign-in against the hosted project (Apple needs a physical device), the `auth/callback` redirect URL in Supabase's Redirect URLs, the Sign in with Apple key in Edge Function secrets, account deletion tested end to end from the settings screen (Apple revoke included), push credentials via `eas credentials`, RevenueCat sandbox purchases, the three `app-sites` URLs entered in App Store Connect and the Play Console, and Google's closed test.
+Things only a human with live accounts can finish, once per app: Google and Apple sign-in against the hosted project (Apple needs a physical device), the `auth/callback` redirect URL in Supabase's Redirect URLs, every bundle id in the Supabase Apple provider's Client IDs, the Sign in with Apple key in Edge Function secrets, the Google consent screen published, a Google test account for Play's App access, account deletion tested end to end from the settings screen (Apple revoke included), push credentials via `eas credentials`, RevenueCat sandbox purchases, the three `app-sites` URLs entered in App Store Connect and the Play Console, and Google's closed test.
 
 ## Updating the gates
 
-1. Edit the gate file in `gates/`. Keep the total near 100,000 characters (`wc -c gates/*.md`).
+1. Edit the gate file in `gates/`. Keep the total near 110,000 characters (`wc -c gates/*.md`).
 2. Bump `version` in `.claude-plugin/plugin.json` — patch for tweaks, minor for new content, major for anything consumers must act on. Gate text updates without a bump, but skills, hooks and the agent only update when the version changes; skip it and they fall behind the gates.
 3. Commit and push. Auto-update runs in the background of an interactive session, so the change arrives one session later. To take it now: `claude plugin marketplace update rn-ways-of-working && claude plugin update rn-ways-of-working@rn-ways-of-working`, then start a new session.
 

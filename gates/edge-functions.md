@@ -34,7 +34,7 @@ Folders are kebab-case. Each function is one handler. In `supabase/config.toml` 
 ## The portability rule
 
 - A handler is `(request: Request) => Promise<Response>`. Web-standard APIs only: `Request`, `Response`, `fetch`, `URL`, `crypto`.
-- Imports use **`npm:` specifiers** (`npm:@supabase/server`, `npm:zod`, `npm:expo-server-sdk`). No `https://deno.land/...`, no `jsr:`.
+- Imports use **`npm:` specifiers pinned to a major** (`npm:@supabase/server@1`, `npm:zod@4`). No `https://deno.land/...`, no `jsr:`.
 - **`Deno.*` appears in exactly one file**, `_shared/runtime.ts`. A handler never calls it.
 
 ```ts
@@ -56,7 +56,7 @@ Authentication and the Supabase client come from `@supabase/server`, which reads
 
 ```ts
 // supabase/functions/<name>/index.ts
-import { createContextClient, verifyAuth } from 'npm:@supabase/server/core'
+import { createContextClient, verifyAuth } from 'npm:@supabase/server@1/core'
 import { serve } from '../_shared/runtime.ts'
 
 serve(async (request) => {
@@ -71,14 +71,15 @@ serve(async (request) => {
 })
 ```
 
-- **Identity comes from the verified token** (`auth.userClaims.id`), never from the request body or query string.
+- **Identity comes from the verified token** (`auth.userClaims`, checked for null), never from the request body or query string.
+- **The project signs JWTs with its signing keys** (Settings → JWT Keys), never the legacy shared secret: `verifyAuth` rejects legacy HS256 tokens.
 - **`createContextClient` is the default** — it carries the caller's JWT, so RLS still applies inside the function.
 - **`createAdminClient()` bypasses RLS.** Use it only in a job that genuinely spans users or runs with no caller (a webhook, a scheduled send), and say why in a one-line comment at the call site. A function that *needs* it to serve an end user is a missing RLS policy, not a reason to bypass.
 - **A job with no user** (a `pg_cron` schedule or a trigger calling through `pg_net`) authenticates with the project's secret key: `verifyAuth(request, { auth: 'secret' })` checks the `apikey` header against `SUPABASE_SECRET_KEYS`. The SQL side reads that key from Supabase Vault (`vault.decrypted_secrets`), never from a table or a migration.
 
 ## Secrets
 
-- Secrets live in the project: `supabase secrets set REVENUECAT_WEBHOOK_SECRET=…`. Locally they come from `supabase/functions/.env`, which is gitignored and passed with `supabase functions serve --env-file supabase/functions/.env`.
+- Secrets live in the project: `supabase secrets set REVENUECAT_WEBHOOK_AUTH=…`. Locally they come from `supabase/functions/.env`, which is gitignored and passed with `supabase functions serve --env-file supabase/functions/.env`.
 - Read them through `getEnv('NAME')` so a missing secret fails at startup with its name, not with an undefined later.
 - The platform injects `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEYS` and `SUPABASE_SECRET_KEYS`; nothing else about Supabase is configured by hand. The legacy key names never appear.
 
@@ -88,38 +89,42 @@ A webhook handler authenticates the sender, validates the payload, and is idempo
 
 ```ts
 // supabase/functions/revenuecat-webhook/index.ts
-import { createAdminClient } from 'npm:@supabase/server/core'
+import { createAdminClient } from 'npm:@supabase/server@1/core'
 import { getEnv, serve } from '../_shared/runtime.ts'
-import { eventSchema, toEntitlementEvent } from '../_shared/revenuecat.ts'   // the fields you read, and their RPC parameters
+import { secretMatches } from '../_shared/secret.ts'
+import { eventSchema, fetchEntitlements, userIdsOf } from '../_shared/revenuecat.ts'
+
+const FOREIGN_KEY_VIOLATION = '23503'
 
 serve(async (request) => {
-  if (request.headers.get('Authorization') !== `Bearer ${getEnv('REVENUECAT_WEBHOOK_SECRET')}`) {
-    return new Response('Unauthorized', { status: 401 })
-  }
+  if (!secretMatches(request.headers.get('Authorization'), getEnv('REVENUECAT_WEBHOOK_AUTH'))) return new Response('Unauthorized', { status: 401 })
 
   const parsed = eventSchema.safeParse(await request.json())
   if (!parsed.success) return new Response('Bad payload', { status: 400 })
 
   const supabase = createAdminClient()   // a webhook has no caller; writes span users
-  const { error } = await supabase.rpc('apply_entitlement_event', toEntitlementEvent(parsed.data))
-  if (error) return new Response('Update failed', { status: 500 })
+  for (const userId of userIdsOf(parsed.data.event)) {
+    const entitlements = await fetchEntitlements(userId, getEnv('REVENUECAT_API_KEY'))
+    const { error } = await supabase.rpc('sync_entitlements', { p_user_id: userId, p_entitlements: entitlements })
+    if (error && error.code !== FOREIGN_KEY_VIOLATION) return new Response('Sync failed', { status: 500 })
+  }
 
   return new Response('ok')
 })
 ```
 
-- **The shared secret is compared on every request**; the URL being obscure is not authentication.
-- **The payload is Zod-validated** before anything reads it; the sender's docs are not a contract.
-- **A redelivered or out-of-order event is a no-op**: a UNIQUE index on the sender's event id (`database-standards`), or, for RevenueCat, the `event_at` guard in `apply_entitlement_event()` (`store-and-monetisation`).
-- Respond quickly with 2xx once the event is stored; do slow work from a trigger or `pg_cron`, not inside the webhook.
+- **The sender is authenticated on every request**, in constant time (`_shared/secret.ts`); the URL being obscure is not authentication. `REVENUECAT_WEBHOOK_AUTH` is the exact Authorization value set in RevenueCat's dashboard, which sends it verbatim.
+- **The payload is Zod-validated** before anything reads it; the sender's docs are not a contract. `userIdsOf` returns `app_user_id`, or both sides of a `TRANSFER`, and skips RevenueCat's anonymous ids.
+- **Redelivered and out-of-order events are harmless.** The RevenueCat handler re-reads current state from `GET /v1/subscribers/{id}`; another sender gets a UNIQUE index on its event id (`database-standards`). An account deleted since the event is a foreign-key miss and still answers 200.
+- Answer 200 quickly — RevenueCat retries anything else; slow work goes to a trigger or `pg_cron`.
 
 ## Revoking Sign in with Apple
 
-`revoke-apple-token` is called by the signed-in user during account deletion with `{ authorizationCode }`, Zod-validated. It signs a client secret (an ES256 JWT via `npm:jose`, per Apple's docs) from `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (the Sign in with Apple `.p8`) and `APPLE_CLIENT_ID` (the bundle id), exchanges the code at `https://appleid.apple.com/auth/token`, then posts the refresh token to `https://appleid.apple.com/auth/revoke` with `token_type_hint=refresh_token`. A failure is logged and returned as a 502; the app carries on deleting.
+`revoke-apple-token` is called by the signed-in user during account deletion with `{ authorizationCode }`, Zod-validated. It signs a client secret (an ES256 JWT via `npm:jose`, per Apple's docs) from `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` (the Sign in with Apple `.p8`) and `APPLE_CLIENT_ID` (the bundle id), exchanges the code at `https://appleid.apple.com/auth/token`, then posts the refresh token to `https://appleid.apple.com/auth/revoke` with `token_type_hint=refresh_token`; both take `application/x-www-form-urlencoded` bodies. `APPLE_PRIVATE_KEY` is stored with its newlines escaped as `\n` and unescaped on read. A failure is logged and returned as a 502; the app carries on deleting.
 
 ## The push sender
 
-`send-push` reads `device_push_token` with the admin client for the users it is told to reach, sends through `npm:expo-server-sdk` in `chunkPushNotifications` batches, and deletes tokens whose receipt says `DeviceNotRegistered`. It is called by `pg_net` from a trigger or `pg_cron` with the secret key as `apikey` (verified with `auth: 'secret'`) — never by a user, signed in or not, or anyone could push to anyone.
+`send-push` reads `device_push_token` with the admin client for the users it is told to reach and posts to `https://exp.host/--/api/v2/push/send` with `fetch`, up to 100 messages a request, with `Authorization: Bearer` and the `EXPO_ACCESS_TOKEN` secret. A ticket that says `DeviceNotRegistered` deletes its token at once. It is called by `pg_net` from a trigger or `pg_cron` with the secret key as `apikey` (verified with `auth: 'secret'`) — never by a user, signed in or not, or anyone could push to anyone.
 
 ## Local run, deploy, logs
 

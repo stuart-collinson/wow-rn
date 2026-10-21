@@ -21,7 +21,7 @@ It assumes the stack in `project-structure` (one Expo app talking to its own Sup
 
 **The dividing line, stated once and applied everywhere: is it React / React-Query (hooks, query keys, `queryOptions`, `queryClient.query`) → `hooks/<domain>/`. Is it a Supabase call → `lib/api/<domain>.ts`.** A file with no React and no TanStack import never belongs under `hooks/`, and the Supabase client is never imported above `lib/`.
 
-Each of these is a **gate failure**: a `supabase.from(...)` call under `hooks/`, in a component or a route file; a domain with no `<domain>.cache.ts`; a query key or `staleTime` hand-built inside a hook; a network file named `<domain>Api.ts` instead of `lib/api/<domain>.ts`; an `index.ts` barrel anywhere in the domain folder; a server read done with `useState` + `useEffect` instead of a cached `use*` hook.
+Each of these is a **gate failure**: a `supabase.from(...)` call under `hooks/`, in a component or a route file; a domain with reads but no `<domain>.cache.ts` (write-only network files such as `auth.ts`, `account.ts` and `pushTokens.ts` need none); a query key or `staleTime` hand-built inside a hook; a network file named `<domain>Api.ts` instead of `lib/api/<domain>.ts`; an `index.ts` barrel anywhere in the domain folder; a server read done with `useState` + `useEffect` instead of a cached `use*` hook.
 
 ## 0. File & folder map (the canonical layout)
 
@@ -90,7 +90,7 @@ export const createAppQueryClient = () =>
   })
 ```
 
-`supabase-js` retries a read itself — up to three attempts with backoff on a network failure or a 503 — so TanStack's retries stay off; stacking both turns one dead connection into a dozen requests. Without `networkMode: 'always'`, the `onlineManager` wiring (§3) pauses an offline write with `isPending` stuck on instead of failing it.
+`supabase-js` retries a GET itself — up to three retries with backoff on a network failure, a 503 or a 520 — so TanStack's retries stay off; stacking both turns one dead connection into a dozen requests. An `rpc()` is a POST and isn't retried. Without `networkMode: 'always'`, the `onlineManager` wiring (§3) pauses an offline write with `isPending` stuck on instead of failing it.
 
 ### 2a. The persisted cache — online-first, instant on relaunch
 
@@ -111,7 +111,7 @@ return (
 ```
 
 - Reads are instant from cache, then refetched when stale. **Writes need a connection** — there is no offline mutation queue; a failed mutation surfaces to the user (§8).
-- **The auth listener clears the cache, not a button.** The session provider's `onAuthStateChange` handler runs `queryClient.cancelQueries()`, `queryClient.clear()` and `await queryPersister.removeClient()` on `SIGNED_OUT` and on `INITIAL_SESSION` with no session. Sessions end without anyone tapping sign-out — a revoked refresh token, an app killed mid-sign-out — and the persisted cache would otherwise show the next user the previous user's screens.
+- **The auth listener clears the cache, not a button.** The session provider subscribes through `subscribeToAuthChanges()` in `lib/api/auth.ts` (wrapping `onAuthStateChange`), and on `SIGNED_OUT` or an `INITIAL_SESSION` with no session runs `queryClient.cancelQueries()`, `queryClient.clear()`, `await queryPersister.removeClient()` and resets every persisted Zustand store. Sessions end without anyone tapping sign-out — a revoked refresh token, an app killed mid-sign-out — and the persisted cache would otherwise show the next user the previous user's screens.
 - **Sign-out** (`hooks/useSignOut.ts`) first does what needs the live session — `deletePushTokenRequest(token)` when push is on, `Purchases.logOut()` when payments are on, each in its own `try`/`catch` that logs and carries on — then `signOutRequest()`. A failed step never leaves the user signed in.
 
 ## 3. React Native wiring — `focusManager` + `onlineManager`
@@ -123,7 +123,7 @@ Two bits of wiring at the app root, done **once**. Without them, `refetchOnWindo
 const subscription = AppState.addEventListener('change', (status) => focusManager.setFocused(status === 'active'))
 return () => subscription.remove()
 
-// module load, once — pause queries and mutations while offline, resume on reconnect (expo-network)
+// lib/queryClient.ts, at module load — pause queries while offline, resume on reconnect (expo-network)
 onlineManager.setEventListener((setOnline) => {
   const subscription = Network.addNetworkStateListener((state) => setOnline(!!state.isConnected))
   return () => subscription.remove()
@@ -140,6 +140,8 @@ onlineManager.setEventListener((setOnline) => {
 // lib/api/dataError.ts
 import type { PostgrestError } from '@supabase/supabase-js'
 
+type Result<T> = { data: T | null; error: PostgrestError | null }
+
 export class DataError extends Error {
   constructor(public code: string, message: string, public details?: string) {
     super(message)
@@ -153,8 +155,6 @@ export class NetworkError extends Error {
     this.name = 'NetworkError'
   }
 }
-
-type Result<T> = { data: T | null; error: PostgrestError | null }
 
 const toError = (error: PostgrestError): Error =>
   error.code ? new DataError(error.code, error.message, error.details) : new NetworkError(error.message)
@@ -193,7 +193,7 @@ export const fetchWorkouts = async (params: WorkoutListParams) => {
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
     .limit(params.pageSize + 1)
-  if (params.search) query = query.ilike('name', `%${params.search.replace(/[\\%_]/g, '\\$&')}%`)
+  if (params.search) query = query.ilike('name', `%${params.search.replaceAll('*', '').replace(/[\\%_]/g, '\\$&')}%`)
   if (params.cursor) query = query.lt('created_at', params.cursor)
   const rows = unwrap(await query)
   const page = rows.slice(0, params.pageSize)
@@ -215,7 +215,7 @@ export const deleteWorkoutRequest = async (id: string) =>
 - **Explicit columns, always.** `WORKOUT_COLUMNS` (`types/workout.types.ts`) lists every column the mapper reads; never `select('*')`. Related rows come from relational selects (`exercise:exercise_id(id, name)`), never a loop.
 - **Rows are `snake_case`; domain types are `camelCase`.** The mapper (`toWorkout(row: WorkoutRow): Workout`) lives beside the type in `types/workout.types.ts`, where `WorkoutRow` is `Database['public']['Tables']['workout']['Row']` from the generated types. Hooks and screens never see a snake_case field.
 - **Inserts never set `user_id`.** The column defaults to `auth.uid()` (see `database-standards`); the row belongs to whoever is signed in, and a client can't claim otherwise.
-- **The seam.** Only `lib/api/` imports `@/lib/supabase`. If an app ever gains a Hono API, a `client.ts` returns here and each fetcher becomes one HTTP call; nothing above this folder changes.
+- **The seam.** Only `lib/api/` imports `@/lib/supabase` — fetchers, the auth wrappers and the realtime subscriptions — so changing how the app reaches its data changes only this folder.
 
 ## 5. The cache file — `<domain>.cache.ts`
 
@@ -253,14 +253,14 @@ import { minutes, seconds } from '@/lib/time'
 import type { WorkoutListParams } from '@/lib/api/workouts'
 
 const STALE_TIMES = { list: minutes(2), detail: seconds(30) } as const
-const DEFAULT_PAGE_SIZE = 20
+const WORKOUT_LIST_DEFAULTS = { pageSize: 20 } as const
 
 export const workoutKeys = { /* as above */ }
 
-export const workoutListQuery = (params: Omit<WorkoutListParams, 'cursor'>) =>
+export const workoutListQuery = (params: Omit<WorkoutListParams, 'cursor'> = WORKOUT_LIST_DEFAULTS) =>
   infiniteQueryOptions({
     queryKey: workoutKeys.list(params),
-    queryFn: ({ pageParam }) => fetchWorkouts({ ...params, cursor: pageParam, pageSize: params.pageSize ?? DEFAULT_PAGE_SIZE }),
+    queryFn: ({ pageParam }) => fetchWorkouts({ ...params, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.meta.nextCursor ?? undefined,
     staleTime: STALE_TIMES.list,
@@ -290,7 +290,7 @@ import { workoutDetailQuery } from '@/hooks/workouts/workouts.cache'
 export const useWorkout = (id: string | undefined) =>
   useQuery({
     ...workoutDetailQuery(id ?? ''),
-    enabled: Boolean(id),   // don't fire until the id resolves
+    enabled: Boolean(id),
   })
 ```
 
@@ -336,7 +336,7 @@ When a screen must reflect other devices' writes live, subscribe to Supabase Rea
 
 Long lists paginate by **keyset** (never offset): the fetcher orders by `created_at desc, id desc`, fetches one more row than the page size to learn `hasMore`, and returns the last row's `created_at` as `nextCursor` (§4). There is no URL to hold the cursor on a device, so it lives in the infinite-query cache, not in app state.
 
-`useWorkouts` is `useInfiniteQuery(workoutListQuery(params))`. The screen flattens `data?.pages.flatMap((page) => page.data)` into the `FlatList` and calls `fetchNextPage()` from `onEndReached`, **guarded on `hasNextPage && !isFetching`** — calling it while a fetch is in flight or with no next page races and double-fetches. A `created_at` cursor can skip rows sharing a timestamp to the microsecond; add the `id` tie-break with an `or(...)` filter only for batch-written tables.
+`useWorkouts(params?)` is `useInfiniteQuery(workoutListQuery(params))`; no params means the defaults, the same key the prefetch warms. The screen flattens `data?.pages.flatMap((page) => page.data)` into the `FlatList` and calls `fetchNextPage()` from `onEndReached`, **guarded on `hasNextPage && !isFetching`** — calling it while a fetch is in flight or with no next page races and double-fetches. A `created_at` cursor can skip rows sharing a timestamp to the microsecond; add the `id` tie-break with an `or(...)` filter only for batch-written tables.
 
 ## 11. Prefetch — a per-domain helper + one registry
 
@@ -344,7 +344,7 @@ Warm the cache for the screens the user lands on right after they sign in. Becau
 
 ```ts
 // hooks/workouts/prefetchWorkoutQueries.ts — the screen's own defaults, or you warm a key it never reads
-export const prefetchWorkoutQueries = (queryClient: QueryClient) => queryClient.infiniteQuery(workoutListQuery({ pageSize: 20 }))
+export const prefetchWorkoutQueries = (queryClient: QueryClient) => queryClient.infiniteQuery(workoutListQuery())
 
 // lib/prefetch.ts — one registry, walked once after sign-in; adding a domain is one line
 const TASKS = [{ domain: 'workouts', run: prefetchWorkoutQueries }, { domain: 'appConfig', run: prefetchAppConfigQueries }]
@@ -353,7 +353,7 @@ export const prefetchInitialData = (queryClient: QueryClient) => {
 }
 ```
 
-Warm with `queryClient.query()` / `infiniteQuery()` — `prefetchQuery` is deprecated. They skip data that isn't stale yet and reject on failure, which the registry's `.catch` logs. Trigger it **once**, after a successful sign-in — not from a per-screen effect. Each task is fire-and-forget with its own `.catch` so one domain's failure can't sink the others; prefetch is opportunistic, silent on slow and on failure.
+Warm with `queryClient.query()` / `infiniteQuery()` (TanStack Query 5.102+; `prefetchQuery` is deprecated). They skip data that isn't stale yet and reject on failure, which the registry's `.catch` logs. Trigger it **once**, after a successful sign-in — not from a per-screen effect. Each task is fire-and-forget with its own `.catch` so one domain's failure can't sink the others; prefetch is opportunistic, silent on slow and on failure.
 
 ## 12. The `appConfig` domain — remote config is just another query
 

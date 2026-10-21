@@ -21,10 +21,10 @@ const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_P
 
 ## Sign-in
 
-Apple and Google only, and every app requires it: the sign-in screen says in one line why an account is needed (your data syncs across devices), and the App Review notes say the same. The calls live in `lib/api/auth.ts`.
+Apple and Google only, and every app requires it. The sign-in screen says in one line why an account is needed (your data syncs across devices) and links the privacy and support pages; the App Review notes say the same. Email sign-up is off: `enable_signup = false` under `[auth.email]` in `config.toml`, and the Email provider disabled in the dashboard. The calls live in `lib/api/auth.ts`.
 
-- **Apple, iOS only:** `AppleAuthentication.signInAsync()` → `supabase.auth.signInWithIdToken({ provider: 'apple', token: credential.identityToken })`. Apple sends the name only on the first sign-in; save it to `profile.display_name` then.
-- **Google, both platforms, in the browser:** `signInWithOAuth({ provider: 'google', options: { redirectTo, skipBrowserRedirect: true } })` → `WebBrowser.openAuthSessionAsync(data.url, redirectTo)` → `exchangeCodeForSession(code)` from the returned URL. `redirectTo` is `Linking.createURL('auth/callback')`, listed in the dashboard's Redirect URLs and `config.toml`'s `additional_redirect_urls`; `app/+native-intent.tsx` maps that path to `/` so Android's copy of the redirect never hits the not-found screen. No native Google SDK: the free one runs on Android sign-in APIs Google has deprecated.
+- **Apple, iOS only:** `AppleAuthentication.signInAsync({ requestedScopes: [FULL_NAME, EMAIL] })` → once `credential.identityToken` is non-null, `supabase.auth.signInWithIdToken({ provider: 'apple', token })`. Apple sends the name only on the first sign-in; save it to `profile.display_name` then. Every bundle id the app ships under goes in the Supabase Apple provider's Client IDs. An Apple account can't sign in on Android, and that is accepted: Android shows Google only.
+- **Google, both platforms, in the browser:** `signInWithOAuth({ provider: 'google', options: { redirectTo, skipBrowserRedirect: true } })` → `WebBrowser.openAuthSessionAsync(data.url, redirectTo)` → `exchangeCodeForSession(code)` from the returned URL. `redirectTo` is `Linking.createURL('auth/callback')`, listed in the dashboard's Redirect URLs and `config.toml`'s `additional_redirect_urls`; `app/+native-intent.tsx` maps that URL (host `auth`, path `/callback` on the custom scheme) to `/` and never throws, so Android's copy of the redirect never hits the not-found screen. No native Google SDK: the free one runs on Android sign-in APIs Google has deprecated.
 
 ## Session & device storage
 
@@ -37,8 +37,8 @@ export const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env
 })
 ```
 
-- **The default is the app sandbox**, which iOS and Android encrypt at rest per app — what Expo's own Supabase integration scaffolds. `startAutoRefresh()` / `stopAutoRefresh()` follow `AppState` so tokens refresh in the foreground.
-- **Escalation rule:** an app handling health, finance, or similarly sensitive data stores the session with Supabase's documented `LargeSecureStore` pattern (an AES key in `expo-secure-store`, the encrypted session in AsyncStorage). Copy that pattern verbatim from Supabase's Expo guide; Supabase warns that "optimising" it introduces subtle vulnerabilities.
+- **The default is the app sandbox**, which iOS and Android encrypt at rest per app — what Expo's own Supabase integration sets up. `AppShell`'s `AppState` listener calls `startAutoRefresh()` / `stopAutoRefresh()` through `lib/api/auth.ts`, so tokens refresh in the foreground.
+- **Escalation rule:** an app handling health, finance, or similarly sensitive data stores the session with Supabase's documented `LargeSecureStore` pattern (an AES key in `expo-secure-store`, the encrypted session in AsyncStorage). Copy that pattern verbatim from Supabase's Expo guide; Supabase warns that "optimising" it introduces subtle vulnerabilities. Such an app also keeps its sensitive queries out of the persisted cache (`dehydrateOptions.shouldDehydrateQuery`) and sets `android.allowBackup: false`.
 - `kvStorage` (`expo-sqlite/kv-store`) holds non-sensitive state: the query cache, settings, review-prompt counters. Anything secret a user types in (a key to a service they own) goes in `expo-secure-store`.
 - No token ever lands in a Zustand store, a log line, or a component prop.
 
@@ -47,10 +47,11 @@ export const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env
 ## Input & deep-link validation
 
 ```typescript
-// PASS — Zod-validate every external input, including route/deep-link params
+// PASS — Zod-validate every external input, including route/deep-link params; hooks before any return
 const { id } = useLocalSearchParams<{ id: string }>()
-const parsed = z.uuid().safeParse(id)
-if (!parsed.success) return <NotFound />
+const workoutId = z.uuid().safeParse(id).data
+const query = useWorkout(workoutId)
+if (!workoutId) return <NotFound />
 ```
 
 - All user input, **deep-link / route params**, Edge Function payloads, and `app_config` values are validated with Zod before use — a deep link is attacker-controllable input, and a config row was typed by hand.
@@ -61,7 +62,7 @@ if (!parsed.success) return <NotFound />
 Authorisation lives in the database, never in the app. The client deciding "this user is pro, show the button" is a UX nicety, not a security control — a modified client skips it.
 
 - **RLS enabled on every table** with per-action policies (see `database-standards`). It's the enforcement that survives a tampered client, and with no API in front of Postgres it is the only one.
-- **The Supabase client is imported only in `lib/`** (`tanstack-query` → the seam). A `supabase.from()` in a component is a review failure because it is where ad-hoc, unreviewed access starts.
+- **The Supabase client is imported only in `lib/api/`** (`tanstack-query` → the seam). A `supabase.from()` in a component is a review failure because it is where ad-hoc, unreviewed access starts.
 - **Edge Functions verify their caller** and take identity from the verified token (`edge-functions`).
 - **Privileged operations** (account deletion, anything touching `auth.users`) are `SECURITY DEFINER` functions that act on `auth.uid()` and nothing else.
 
@@ -75,7 +76,7 @@ const { data } = await supabase.from('workout').select('id, name').eq('id', work
 const query = `SELECT * FROM workout WHERE id = '${workoutId}'`
 ```
 
-Never compose SQL as a string. Genuine raw-SQL needs go in a Postgres function with typed parameters. For `ILIKE` patterns, escape `%`, `_`, `\` in user input before interpolating into the pattern. Never let the user choose a column, table, or operator without an allow-list.
+Never compose SQL as a string. Genuine raw-SQL needs go in a Postgres function with typed parameters. For `ILIKE` patterns, escape `%`, `_`, `\` in user input and strip `*`, which PostgREST reads as a wildcard and can't escape. Never let the user choose a column, table, or operator without an allow-list.
 
 ## Ads & tracking
 
@@ -86,7 +87,7 @@ Never compose SQL as a string. Genuine raw-SQL needs go in a Postgres function w
 
 - **HTTPS only.** No cleartext traffic — keep `usesCleartextTraffic` off (Android) and ATS on (iOS).
 - Set `autoCapitalize="none"` and `secureTextEntry` on credential-like inputs; disable screenshots on sensitive screens where the platform allows.
-- Keep the Expo SDK and native dependencies current; run `pnpm audit` and address high-severity advisories. Don't ship `expo-dev-client` or debug-only tooling in production builds.
+- Keep the Expo SDK and native dependencies current; run `pnpm audit` and address high-severity advisories. Production builds carry no debug-only tooling (EAS strips `expo-dev-client` from them).
 - **Supabase Storage buckets are private** with signed URLs of 15 minutes or less. Each user's files live under a `<user id>/` folder, with `storage.objects` policies on `(storage.foldername(name))[1] = (SELECT auth.uid())::text`. File size and MIME allow-list are bucket settings; filenames are generated (`crypto.randomUUID()`), never the user's.
 
 ## Sensitive data exposure
@@ -104,7 +105,8 @@ Never compose SQL as a string. Genuine raw-SQL needs go in a Postgres function w
 | String-concatenated SQL | CRITICAL | Typed builder / RPC with parameters |
 | Webhook handler without a secret check | CRITICAL | Compare the shared secret on every request |
 | Legacy API keys (`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, an `eyJ…` key) in a new repo | HIGH | Publishable and secret keys; the `anon` Postgres role is current |
-| Supabase client imported outside `lib/` | HIGH | Move the call into a fetcher |
+| Supabase client imported outside `lib/api/` | HIGH | Move the call into a fetcher |
+| Function without `REVOKE … FROM public, anon, authenticated`, or a table without explicit grants | HIGH | Revoke, then grant one role (`database-standards`) |
 | Unvalidated deep-link param used in a query/navigation | HIGH | Zod-validate before use |
 | Ad request before the consent form resolves | HIGH | Gate on `initialiseAds()` |
 | Cleartext HTTP traffic | HIGH | HTTPS only |

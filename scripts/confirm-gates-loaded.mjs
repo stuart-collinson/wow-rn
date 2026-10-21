@@ -17,7 +17,8 @@ const root =
   process.env.CLAUDE_PLUGIN_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const markerDir = join(tmpdir(), PLUGIN);
 const event = JSON.parse(readFileSync(0, 'utf8'));
-const marker = (kind) => join(markerDir, `${event.session_id ?? 'unknown'}.${kind}`);
+if (!event.session_id) process.exit(0);
+const marker = (kind) => join(markerDir, `${event.session_id}.${kind}`);
 
 const writeMarker = (kind) => {
   mkdirSync(markerDir, { recursive: true });
@@ -28,7 +29,12 @@ const writeMarker = (kind) => {
 const isOurGates = (file) => {
   if (!file || basename(file) !== ENTRY) return false;
   const manifest = resolve(dirname(file), '..', '.claude-plugin', 'plugin.json');
-  return existsSync(manifest) && JSON.parse(readFileSync(manifest, 'utf8')).name === PLUGIN;
+  if (!existsSync(manifest)) return false;
+  try {
+    return JSON.parse(readFileSync(manifest, 'utf8')).name === PLUGIN;
+  } catch {
+    return false;
+  }
 };
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));

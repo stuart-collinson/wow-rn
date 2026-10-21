@@ -9,8 +9,9 @@ The schema lives **in code** as SQL migration files under `supabase/migrations/`
 - **Append-only.** Once a migration is merged, never edit it. If it was wrong, write a new migration that corrects it.
 - **One logical change per migration.** Adding a table, adding a column, changing a constraint — each is its own file.
 - **Every migration is idempotent. No exceptions.** We do not write down-migrations, and Supabase is not rolled back when someone locally reverts a commit. A migration that ran, was reverted in git, and is re-applied must succeed on a database where its effects already exist. Use the patterns below — `CREATE … IF NOT EXISTS`, `DROP … IF EXISTS`, `CREATE OR REPLACE`, `ON CONFLICT DO NOTHING`, and `DO` blocks for objects without native `IF [NOT] EXISTS` support.
-- **Prove it re-applies.** `supabase db reset` builds the local database from empty, so it proves the chain applies but never that it re-applies. `pnpm db:check` does both: a reset, then every migration run again on top — `supabase db reset && for f in supabase/migrations/*.sql; do supabase db query --local -f "$f" || exit 1; done`. Any error fails it. That's the idempotency check, and CI runs it too.
+- **Prove it re-applies.** `supabase db reset` builds the local database from empty, so it proves the chain applies but never that it re-applies. `pnpm db:check` resets, then runs every migration this branch adds a second time on top: `supabase db reset && for f in $(git diff --name-only --diff-filter=A origin/main -- supabase/migrations); do psql postgresql://postgres:postgres@127.0.0.1:54322/postgres -v ON_ERROR_STOP=1 -f "$f" || exit 1; done`. Any error fails it; CI runs it with full git history. Only new migrations re-run, because an old one may rightly clash with what later migrations changed.
 - **RLS policies are part of the schema** — a new table's migration enables RLS and defines its policies in the same file.
+- **Every table migration grants access explicitly.** Supabase no longer exposes new tables to the API by default (on every project from 30 October 2026): `GRANT SELECT, INSERT, UPDATE, DELETE ON t TO authenticated` for what users touch, `GRANT SELECT ON t TO anon` only where signed-out users read (`app_config`), and `service_role` only what an Edge Function touches. The grant lets a role reach the table; RLS then decides which rows.
 
 ### Workflow — Supabase CLI
 
@@ -25,7 +26,7 @@ supabase link --project-ref <project-ref>       # connect this repo to the app's
 supabase start                                  # local stack (pnpm db:start)
 supabase migration new <description>            # supabase/migrations/<timestamp>_<description>.sql — write idempotent SQL
 supabase db reset                               # rebuilds the local database from every migration (pnpm db:reset)
-pnpm db:check                                   # reset, then re-runs every migration on top — the idempotency check
+pnpm db:check                                   # reset, then re-runs this branch's new migrations — the idempotency check
 supabase gen types typescript --local > src/types/database.types.ts   # pnpm db:types
 supabase db push                                # pending migrations → the hosted project (pnpm db:push)
 ```
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS workout (
 );
 
 ALTER TABLE workout ENABLE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE ON workout TO authenticated;
 
 DROP POLICY IF EXISTS "users manage own workouts" ON workout;
 CREATE POLICY "users manage own workouts"
@@ -111,7 +113,7 @@ created_at  timestamptz NOT NULL DEFAULT now(),
 updated_at  timestamptz NOT NULL DEFAULT now()
 ```
 
-`updated_at` is maintained by the shared `set_updated_at()` trigger (skeleton below) — application code never sets it. A user-owned table also carries `user_id uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE`, so inserts never name the user and account deletion cascades.
+`updated_at` is maintained by the shared `set_updated_at()` trigger (skeleton below) — application code never sets it. The skeleton's exceptions are deliberate: `profile.id` is the auth user's id, `app_config` is keyed by `key`, `entitlement` by `(user_id, entitlement)`. A user-owned table also carries `user_id uuid NOT NULL DEFAULT auth.uid() REFERENCES auth.users(id) ON DELETE CASCADE`, so inserts never name the user and account deletion cascades.
 
 ### Types
 
@@ -133,6 +135,7 @@ RLS is the **primary authorisation mechanism** — there is no API in front of t
 - **Compare with `(SELECT auth.uid())`**, not bare `auth.uid()` — the subselect is evaluated once per query instead of once per row.
 - **Policy names describe the rule** in plain language — `"users manage own workouts"`. The name shows up in errors and the dashboard.
 - **A user never writes what grants them something.** Plan, role, credits and the like live in their own table with a SELECT-own policy and no write policies; only a webhook or a `SECURITY DEFINER` function writes it. `FOR ALL` own-row policies are for data the user fully owns.
+- **A child row checks its parent's owner.** Foreign-key checks bypass RLS, so a policy that only checks the child's `user_id` lets a user attach rows to someone else's parent. A child table's `WITH CHECK` adds `EXISTS (SELECT 1 FROM workout WHERE id = workout_id AND user_id = (SELECT auth.uid()))`.
 - **The secret key bypasses RLS** — it exists only inside Edge Functions (`edge-functions`) for jobs that genuinely span users, never as a workaround for a missing policy.
 - **Test under both anon and authenticated.** Anon should typically see nothing (except `app_config`); an authenticated user should see only their own rows.
 
@@ -145,7 +148,8 @@ A view runs as its *owner* and bypasses RLS by default. Any view over an RLS-pro
 ## Functions, Triggers & Jobs
 
 - **RPC for atomic multi-table writes.** One user action that changes several tables is a Postgres function called with `supabase.rpc('verb_noun', { … })` from the fetcher. Default to `SECURITY INVOKER` so RLS still applies inside it.
-- **`SECURITY DEFINER` only when the function must do what the caller can't** (touch `auth.users`, write a row for another user). Every such function sets `SET search_path = ''` and schema-qualifies every name, and grants `EXECUTE` to exactly the role that needs it with `REVOKE … FROM public, anon`.
+- **`SECURITY DEFINER` only when the function must do what the caller can't** (touch `auth.users`, write a row for another user). Every such function sets `SET search_path = ''` and schema-qualifies every name.
+- **Every function starts with no callers.** Supabase grants `EXECUTE` on each new `public` function to `anon` and `authenticated`, so a migration runs `REVOKE EXECUTE … FROM public, anon, authenticated`, then grants exactly the role that needs it. A function meant only for Edge Functions is `SECURITY INVOKER` and granted to `service_role` alone; skip the revoke and any signed-in user can call it.
 - **Triggers are for invariants the database alone guarantees** — `updated_at`, the profile row that must exist for every auth user. Not for business logic; that lives in the app or an RPC.
 - **Schedules and outbound calls stay in Postgres.** `pg_cron` for schedules, `pg_net` to call an Edge Function or webhook from SQL — both enabled in a migration with `CREATE EXTENSION IF NOT EXISTS`.
 
@@ -162,12 +166,13 @@ Substring search (`ILIKE '%term%'`) wants a `pg_trgm` GIN index and a minimum se
 
 ## The Skeleton Schema
 
-Every app's first five migrations are this skeleton. They are the worked example of every rule above, and the tables other gates rely on.
+Every app's first migrations are this skeleton, each table with the grants above. They are the worked example of every rule here, and the tables other gates rely on.
 
 | Migration | Holds |
 |---|---|
 | `set_updated_at` | the shared touch trigger function (`plpgsql`, `SET search_path = ''`), applied to every table with `updated_at` |
-| `profile` | one row per auth user: `id` references `auth.users` with cascade, `display_name`; RLS read/update own; `handle_new_user()` (`SECURITY DEFINER`) inserts it from an `AFTER INSERT ON auth.users` trigger with `ON CONFLICT DO NOTHING` — the app never creates profiles |
+| `profile` | one row per auth user: `id` references `auth.users` with cascade, `display_name` nullable (Apple sends a name only once); RLS read/update own; `handle_new_user()` (`SECURITY DEFINER`) inserts it from an `AFTER INSERT ON auth.users` trigger with `ON CONFLICT DO NOTHING` — the app never creates profiles |
 | `app_config` | `key text PRIMARY KEY, value jsonb NOT NULL, updated_at` with the touch trigger; RLS `SELECT TO anon, authenticated USING (true)`, **no write policies**; seeds `ads_enabled = false` and `min_supported_version = "1.0.0"` with `ON CONFLICT (key) DO NOTHING` |
-| `delete_my_account` | `SECURITY DEFINER` SQL function that runs `DELETE FROM auth.users WHERE id = auth.uid()`; `REVOKE EXECUTE … FROM public, anon`, `GRANT EXECUTE … TO authenticated`; the cascades remove every user-owned row. Storage has no cascade from `auth.users`, and Supabase blocks SQL deletes from `storage.objects`: an app with uploads removes the user's files through the Storage API before calling it (`store-and-monetisation` → Account deletion) |
-| `device_push_token` | `user_id DEFAULT auth.uid()` with cascade, `token text UNIQUE`, `platform CHECK (platform IN ('ios', 'android'))`; RLS `FOR ALL TO authenticated` on own rows; index on `user_id`; touch trigger; `register_push_token(p_token, p_platform)` (`SECURITY DEFINER`, authenticated only) upserts the row and moves the token to the caller — a push token identifies the device, so the last signer-in owns it |
+| `delete_my_account` | `SECURITY DEFINER` SQL function that runs `DELETE FROM auth.users WHERE id = auth.uid()`; `REVOKE EXECUTE … FROM public, anon, authenticated`, then `GRANT EXECUTE … TO authenticated`; the cascades remove every user-owned row. Storage has no cascade from `auth.users`, and Supabase blocks SQL deletes from `storage.objects`: an app with uploads removes the user's files through the Storage API before calling it (`store-and-monetisation` → Account deletion) |
+| `device_push_token` *(push)* | `user_id DEFAULT auth.uid()` with cascade, `token text UNIQUE CHECK (token LIKE 'ExponentPushToken[%')`, `platform CHECK (platform IN ('ios', 'android'))`; RLS SELECT and DELETE own rows, no INSERT or UPDATE policy; index on `user_id`; touch trigger; `register_push_token(p_token, p_platform)` (`SECURITY DEFINER`, authenticated only) is the only writer — it upserts the row and moves the token to the caller, because a push token identifies the device and the last signer-in owns it |
+| `entitlement` *(payments)* | `user_id` with cascade, `entitlement text`, `expires_at timestamptz` (null for lifetime), primary key `(user_id, entitlement)`; RLS SELECT own, no write policies; `sync_entitlements(p_user_id, p_entitlements jsonb)` replaces a user's rows (`SECURITY INVOKER`, `service_role` only); `has_entitlement(p_entitlement)` (`STABLE`, authenticated) is true while the caller has a row with `expires_at IS NULL OR expires_at > now()` (`store-and-monetisation`) |

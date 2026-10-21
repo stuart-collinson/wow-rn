@@ -47,7 +47,7 @@ Write the code. Use this checklist before outputting each file:
 - [ ] No hand-written memoisation (the React Compiler is on); adaptive layout at `md:` for iPad
 
 **Data layer**
-- [ ] Supabase client imported only in `src/lib/`; one fetcher per operation in `lib/api/<domain>.ts` with explicit columns, `unwrap`/`assertOk`, a row mapper
+- [ ] Supabase client imported only in `src/lib/api/`; one fetcher per operation in `lib/api/<domain>.ts` with explicit columns, `unwrap`/`assertOk`, a row mapper
 - [ ] `<domain>.cache.ts` with a key factory and `queryOptions` factories; one hook per file; no barrels
 - [ ] Mutations invalidate the narrowest prefix; the auth listener clears the query client and the persister on every sign-out
 
@@ -58,7 +58,7 @@ Write the code. Use this checklist before outputting each file:
 
 **Database**
 - [ ] Migration is idempotent (`IF NOT EXISTS` / `DROP … IF EXISTS` / `DO`-block guards); `pnpm db:check` passes
-- [ ] RLS enabled + per-action policies in the same migration; plan/role/credits in a read-only table; `snake_case`, singular table name; `user_id DEFAULT auth.uid()`
+- [ ] RLS enabled + per-action policies in the same migration; explicit table grants; functions revoked from `public, anon, authenticated` then granted to one role; plan/role/credits in a read-only table; `snake_case`, singular table name; `user_id DEFAULT auth.uid()`
 - [ ] Types regenerated and committed (`pnpm db:types`)
 
 **Security**

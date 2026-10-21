@@ -74,16 +74,18 @@ a gate overlap, the repo wins; flag any conflict rather than silently picking a 
 
 const warning = (problem) =>
   `
-# WARNING — ${PLUGIN} gates are NOT loaded
+# WARNING — ${PLUGIN} gates: import line not found
 
-${problem}, so no gate text is in this session. A hook cannot carry it: Claude
-Code caps hook context at ${HOST_CONTEXT_CHAR_CAP} characters and the gates are far larger.
+${problem}. If the repo imports the gates some other way, the first-prompt check
+confirms it; otherwise no gate text is in this session. A hook cannot carry it:
+Claude Code caps hook context at ${HOST_CONTEXT_CHAR_CAP} characters and the gates are far larger.
 
-Fix: add this line to this repo's CLAUDE.md, then start a new session:
+Fix: add this line, on its own, to this repo's CLAUDE.md, then start a new session:
 
 ${IMPORT_LINE}
 
-Until then, Read each gate you need from ${gateRoot} before writing any code.
+If the gate text isn't in your context, Read each gate you need from ${gateRoot}
+before writing any code.
 
 ${readFileSync(join(gateRoot, 'ROUTING.md'), 'utf8').trim()}
 `.trim();

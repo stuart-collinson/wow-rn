@@ -13,7 +13,7 @@ Before writing a new component, search for one that does the job. Order of prefe
 Every component file defines exactly one component. Sub-components get their own file in the parent's folder (see `project-structure`). The parent owns data, state, and handlers; sub-components are pure rendering of a single concern.
 
 ```tsx
-// PASS — WorkoutList/WorkoutList.tsx owns logic, composes children
+// PASS — components/Workout/WorkoutList.tsx owns logic, composes children
 const WorkoutList = () => {
   const { data, isPending, error, refetch } = useWorkouts()
 
@@ -100,7 +100,7 @@ Enable **typed routes** (`experiments.typedRoutes: true` in `app.json`) so route
 
 ### Tabs — `NativeTabs`
 
-The signed-in tab bar is the platform's own, from `expo-router/native-tabs`, not a JS re-creation: Liquid Glass on iOS 26+, Material on Android, scroll-to-top and pop-to-root for free. Icons are SF Symbols on iOS and Material symbols on Android, declared per trigger.
+The signed-in tab bar is the platform's own, from `expo-router/native-tabs`, not a JS re-creation: Liquid Glass on iOS 26+, Material on Android, pop-to-root for free. Icons are SF Symbols on iOS and Material symbols on Android, declared per trigger.
 
 ```tsx
 // app/(tabs)/_layout.tsx
@@ -127,13 +127,20 @@ The signed-in/signed-out split is enforced declaratively with `Stack.Protected` 
 
 ```tsx
 // src/components/AppShell/AppShell.tsx — rendered by app/_layout.tsx inside the providers
-import { Stack } from 'expo-router'
+import { useEffect } from 'react'
+import { SplashScreen, Stack } from 'expo-router'
 import { useSession } from '@/hooks/useSession'
+
+SplashScreen.preventAutoHideAsync()
 
 const AppShell = () => {
   const { isAuthenticated, isLoading } = useSession()
 
-  if (isLoading) return null   // the native splash screen stays up
+  useEffect(() => {
+    if (!isLoading) SplashScreen.hide()
+  }, [isLoading])
+
+  if (isLoading) return null
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -189,7 +196,8 @@ RHF is the single source of truth for form state. Never use Zustand or `useState
 ```tsx
 const CreateWorkoutForm = ({ onSubmit }: Props) => {
   const { control, handleSubmit, formState: { errors, isSubmitting } } = useForm({
-    resolver: zodResolver(createWorkoutSchema),   // types come from the schema
+    resolver: zodResolver(createWorkoutSchema),
+    defaultValues: { name: '', durationMinutes: 30 },
   })
 
   return (
@@ -211,6 +219,8 @@ const CreateWorkoutForm = ({ onSubmit }: Props) => {
 
 export default CreateWorkoutForm
 ```
+
+Types come from the schema through the resolver. Every schema field has a `defaultValues` entry and a bound input; a required field left unbound fails submit with nothing on screen.
 
 Multi-step wizards use a **single RHF instance at the parent**, shared via `FormProvider` / `useFormContext` — never a separate `useForm` per step.
 

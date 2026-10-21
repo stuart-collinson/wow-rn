@@ -106,7 +106,7 @@ Annotate the return type when it tells the reader something the body doesn't mak
 ```typescript
 // PASS — annotation documents the value
 const formatDuration = (seconds: number): string => `${Math.round(seconds / 60)}m`
-const useWorkouts = (): { workouts: Workout[]; isLoading: boolean } => { }
+const useDebounce = <T>(value: T, delayMs: number): T => { }
 
 // PASS — nothing to document, no annotation
 const WorkoutCard = ({ workout }: Props) => <Text>{workout.name}</Text>
@@ -128,7 +128,7 @@ function fetchData(url: string) { }
 export default function Screen() { }  // use an arrow function assigned to a const
 ```
 
-Exception: methods inside a `class` use method syntax (classes are rare; `DataError` in `lib/api/` is the one you will meet).
+Exception: methods inside a `class` use method syntax (classes are rare; the error classes in `lib/api/dataError.ts` are the ones you will meet).
 
 ## Control Flow — guard clauses
 

@@ -2,7 +2,7 @@
 
 The shape of a React Native project: **one git repo per app**, holding an Expo app, that app's Supabase project, and nothing else. No workspace, no monorepo, no API server. `pnpm` is the package manager — never `npm`, `yarn` or `bun`. Expo SDK packages install with `pnpm expo install <pkg>`, which picks the version the SDK supports; everything else is `pnpm add`. Every script is `pnpm <script>`, every one-off CLI `pnpm dlx`.
 
-Shared code does not travel between apps as a package; every app is scaffolded to the same skeleton, and these gates keep every app the same shape.
+Shared code does not travel between apps as a package; every app starts from the same baseline (Starting an app, below), and these gates keep every app the same shape.
 
 ## Repo Layout
 
@@ -24,7 +24,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 │   └── +not-found.tsx
 ├── src/
 │   ├── components/             # UI components, each in its own folder (see below)
-│   │   ├── AppShell/           # Stack.Protected auth gate, focus wiring, the UpdateRequired screen
+│   │   ├── AppShell/           # the auth gate and every app-lifetime effect (see Routes below)
 │   │   └── ui/                 # React Native Reusables copy-in primitives (kebab-case, owned by its CLI)
 │   ├── hooks/                  # Cross-cutting hooks flat (useSession.ts, useDebounce.ts)
 │   │   └── workouts/           # one folder per TanStack domain (see tanstack-query)
@@ -61,7 +61,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 The `app/` directory is **routing only**. A file in `app/` is a screen; its job is to read route params, mount a layout, and compose components and hooks from `src/`. No business logic, no large render trees, no large state in a route file — if a screen file grows past ~100 lines, the logic moves to a hook (`src/hooks/`) and the rendering to components (`src/components/`).
 
 - **Route groups** `(name)/` organise screens without adding a URL segment — use them to split signed-in vs signed-out stacks.
-- **Layouts** `_layout.tsx` define the navigator (`Stack` / `NativeTabs`) and wrap providers. The root `_layout.tsx` mounts the providers and renders `AppShell`, which holds the auth gate (its hooks need those providers above them).
+- **Layouts** `_layout.tsx` define the navigator (`Stack` / `NativeTabs`) and wrap providers. The root `_layout.tsx` mounts the providers and renders `AppShell` (its hooks need those providers above them). `AppShell` holds the auth gate and every app-lifetime effect: the splash screen, `focusManager` and Supabase auto-refresh on `AppState`, `configurePurchases()` and `prefetchInitialData()` once a session exists, `initialiseAds()`, and `UpdateRequired` in place of the app when the version is too old.
 - **Dynamic routes** `[id].tsx` read their param with `useLocalSearchParams`.
 - **One screen file serves iOS and Android.** A small difference is a `Platform.OS` check in place (the Apple sign-in button renders on iOS only; `expo-apple-authentication` has no Android). A component that diverges wholesale gets a `Name.ios.tsx` beside the default `Name.tsx`, and Metro picks per platform. Never a second screen per platform.
 
@@ -84,7 +84,7 @@ components/Home/HomeRecentWorkouts.tsx
 components/Workout/WorkoutRow.tsx        # the Workouts tab uses it too, so not under Home/
 ```
 
-One exception: **`components/ui/`** holds React Native Reusables' copy-in primitives flat in kebab-case (`button.tsx`, `text.tsx`, `input.tsx`). That layout is owned by the Reusables CLI (`pnpm dlx @react-native-reusables/cli@latest add <component>`, which adds the Uniwind versions only when `uniwind-types.d.ts` is at the repo root); the files are yours to edit, but don't reformat the folder or put bespoke components there.
+One exception: **`components/ui/`** holds React Native Reusables' copy-in primitives flat in kebab-case (`button.tsx`, `text.tsx`, `input.tsx`). That layout is owned by the Reusables CLI (`pnpm dlx @react-native-reusables/cli@latest add <component>`; it picks the Uniwind versions when it detects Uniwind's Metro config, so check the added files import nothing from `nativewind`); the files are yours to edit, but don't reformat the folder or put bespoke components there.
 
 ## File Naming
 
@@ -106,6 +106,16 @@ supabase/functions/revenuecat-webhook/index.ts   # Edge Functions — kebab-case
 
 The Supabase CLI works on the `supabase/` directory in the current working directory, so it lives at the **repo root** and every `supabase` command runs from there, wrapped as `package.json` scripts. Every app has the same script names: `dev`, `typecheck`, `lint`, `test`, `db:start`, `db:reset`, `db:check`, `db:push`, `db:types`, `build:ios`, `build:android`, `submit:ios`, `submit:android`. The migration workflow lives in `database-standards`; the functions layout in `edge-functions`; the release path in `store-and-monetisation`.
 
+## Starting an app
+
+Every app starts from the same baseline, so no two differ in setup:
+
+1. `pnpm create expo-app@latest <name> --template default` (the current SDK, Expo Router, TypeScript). Delete the example screens, move code under `src/`, and set `strict`, `noUncheckedIndexedAccess` and the `@/*` alias in `tsconfig.json`.
+2. Uniwind, then React Native Reusables, each from its own install guide (`global.css`, `withUniwindConfig` outermost in `metro.config.js`).
+3. Tests use the `jest-expo` preset with `@testing-library/react-native`; `pnpm expo lint` writes the `eslint-config-expo` flat config; `eas-cli` is a dev dependency, so every `eas` call runs the project's version (`pnpm exec eas …`).
+4. `supabase init`, then the skeleton migrations (`database-standards`).
+5. `.github/workflows/ci.yml` on every push: `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, then `supabase start` and `pnpm db:check`, checked out with full history (`fetch-depth: 0`).
+
 ## The `app-sites` repo
 
 App repos are private, and GitHub Pages is free only for public repos, so the pages the stores require live in **one public repo, `app-sites`**, served at your `github.io` address. It holds `index.md` and one folder per app:
@@ -119,7 +129,7 @@ app-sites/
     └── delete-account.md   # Play Console account-deletion URL; the in-app path and an email route
 ```
 
-The folder is added when the app is scaffolded; the repo is created once, the first time.
+The folder is added when the app is set up; the repo is created once, the first time.
 
 ## Path Aliases
 

@@ -56,16 +56,16 @@ If none: _None found._
 | TypeScript strictness (no `any`, `type` not `interface`) | | |
 | Arrow functions / no `function` keyword | | |
 | Naming conventions | | |
-| File structure (imports → types → logic → render) | | |
+| File structure (imports → types → constants → logic → render) | | |
 | Styling (Uniwind className on RN views and Reusables; Expo UI untouched by className; no raw hex) | | |
 | Components (one per file, parent/child split, reuse order respected) | | |
 | State (TanStack Query for server, Zustand for shared, RHF for forms) | | |
-| Data layer (Supabase client only in `lib/`, fetcher per operation, cache file + queryOptions, no barrels) | | |
+| Data layer (Supabase client only in `lib/api/`, fetcher per operation, cache file + queryOptions, no barrels) | | |
 | Loading / empty / error states handled | | |
 | Lists use FlatList/FlashList; no manual memoisation | | |
 | Navigation (Expo Router typed routes, NativeTabs, Stack.Protected auth gate) | | |
 | Edge Functions (portable, caller verified, secrets via getEnv, idempotent webhooks) | | |
-| Migrations idempotent + RLS in same file; types regenerated | | |
+| Migrations idempotent + RLS and explicit grants in same file; functions revoked then granted to one role; types regenerated | | |
 | Monetisation, when enabled (AdBanner gated by app_config and consent; restore purchases present with payments) | | |
 | Security (publishable key only, session storage rule, deep-link validation, no secrets in logs) | | |
 | No unused code / near-zero comments | | |

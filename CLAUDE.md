@@ -4,11 +4,11 @@ This repo is the `rn-ways-of-working` plugin, consumed by my React Native (Expo)
 
 Gate text reaches a session through a **memory import**, never through the hook. Each consuming repo's own `CLAUDE.md` carries the line `@~/.claude/plugins/marketplaces/rn-ways-of-working/gates/GATES.md`, and Claude Code expands that at launch with no size limit. `gates/GATES.md` imports every gate plus `gates/ROUTING.md`. The `SessionStart` hook (`scripts/check-gates.mjs`) only checks that the import line is present and resolves; `scripts/confirm-gates-loaded.mjs` records the real `GATES.md` load (`InstructionsLoaded`) and warns on the first prompt when it didn't happen — a declined external-imports prompt leaves the line in place but loads nothing.
 
-> **Never put gate text in the hook.** Claude Code caps a hook's `additionalContext` at 10,000 characters and replaces anything larger with a file path and a 2 KB preview, with no error. The gates are ~100,000 characters. Before 1.0.0 the hook shipped all of them, and every session silently received the first thousand characters of `coding-standards` and nothing else. `check-gates.mjs` throws rather than emit anything over the cap.
+> **Never put gate text in the hook.** Claude Code caps a hook's `additionalContext` at 10,000 characters and replaces anything larger with a file path and a 2 KB preview, with no error. The gates are ~110,000 characters. Before 1.0.0 the hook shipped all of them, and every session silently received the first thousand characters of `coding-standards` and nothing else. `check-gates.mjs` throws rather than emit anything over the cap.
 
 ## Three rules that keep the plugin honest
 
-- **The gate total stays at about 100,000 characters.** Every gate is loaded into every session of every app. Check with `wc -c gates/*.md` before pushing; if a gate grows, another shrinks.
+- **The gate total stays at about 110,000 characters.** Every gate is loaded into every session of every app. Check with `wc -c gates/*.md` before pushing; if a gate grows, another shrinks.
 - **A vendor or account change updates two places:** the gate that uses it and the account table in `README.md` ("Before you start an app"). Starting a new app must never need a step that isn't written down. This repo is the stack guide, the gates and a few skills — nothing in it points at scaffolding tooling elsewhere.
 - **No AI attribution in git history.** Commits, PR titles and PR bodies carry no `Co-Authored-By: Claude`, no "Generated with" footer, no sign-off. Plain conventional commits only.
 
