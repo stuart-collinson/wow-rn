@@ -44,7 +44,7 @@ Tell the user that an active subscription is cancelled in the App Store or Play 
 
 ## Store pages
 
-Each app has three Markdown pages in the public `app-sites` repo (`project-structure`): `privacy.md`, `support.md`, `delete-account.md`. Their URLs go into App Store Connect (privacy policy, support) and the Play Console (privacy policy, Data safety → account deletion). They exist before the first TestFlight build goes to anyone outside you. The sign-in screen and Settings link `privacy.md` and `support.md`: Apple requires an in-app privacy link in every app.
+Each app has three Markdown pages in the public `app-sites` repo (`project-structure`): `privacy.md`, `support.md`, `delete-account.md`. Their URLs go into App Store Connect (privacy policy, support) and the Play Console (privacy policy, Data safety → account deletion). They exist before the first TestFlight build goes to anyone outside you. The sign-in screen and Settings link `privacy.md` and `support.md`: Apple requires an in-app privacy link in every app. A feature that collects a new kind of user data updates `privacy.md`, the App Store privacy label and Play's Data safety form in the same change.
 
 ## Required app config
 

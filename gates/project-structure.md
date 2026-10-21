@@ -16,10 +16,11 @@ Shared code does not travel between apps as a package; every app starts from the
 │   ├── (tabs)/
 │   │   ├── _layout.tsx         # NativeTabs
 │   │   ├── index.tsx           # Home tab
-│   │   └── workouts/
-│   │       ├── _layout.tsx     # Stack — a tab that pushes screens needs its own
-│   │       ├── index.tsx       # /workouts list
-│   │       └── [id].tsx        # /workouts/:id
+│   │   ├── workouts/
+│   │   │   ├── _layout.tsx     # Stack — a tab that pushes screens needs its own
+│   │   │   ├── index.tsx       # /workouts list
+│   │   │   └── [id].tsx        # /workouts/:id
+│   │   └── settings.tsx        # Settings tab: every row store-and-monetisation requires
 │   ├── +native-intent.tsx      # maps the OAuth redirect path to / (see security-standards)
 │   └── +not-found.tsx
 ├── src/

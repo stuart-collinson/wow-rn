@@ -178,7 +178,7 @@ export const assertOk = ({ error }: { error: PostgrestError | null }) => {
 A domain fetcher is **one query per operation**: the typed builder, explicit columns, `unwrap`/`assertOk`, a row mapper. Nothing more — no `try`/`catch`, no `user_id` filters (RLS), no presentation logic.
 
 ```ts
-// lib/api/workouts.ts — the NETWORK layer (no React, no TanStack). Zero comments.
+// lib/api/workouts.ts — the NETWORK layer (no React, no TanStack)
 import { supabase } from '@/lib/supabase'
 import { assertOk, unwrap } from '@/lib/api/dataError'
 import { WORKOUT_COLUMNS, toWorkout } from '@/types/workout.types'
@@ -386,4 +386,4 @@ Consumers read `config?.ads_enabled === true` — a missing row, a failed fetch,
 ## 13. Directory layout, barrels & comments
 
 - **Sub-resources:** a domain spanning several gets `hooks/<domain>/<sub>/`, mirrored as `lib/api/<domain>/<sub>.ts`; the domain-root files stay at the root. Cross-cutting hooks (`useDebounce`) stay flat in `hooks/`. No `index.ts` barrel anywhere.
-- **Comments:** hooks, prefetch files and fetchers have none; `<domain>.cache.ts` may carry one for non-obvious cache reasoning. Narrow errors with `error instanceof DataError`, never `as any`.
+- **Comments:** `coding-standards`' bar applies; hooks, prefetch files and fetchers rarely meet it. Narrow errors with `error instanceof DataError`, never `as any`.

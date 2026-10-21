@@ -11,7 +11,7 @@ You are a security specialist for React Native (Expo) apps that talk directly to
 
 ## First step — always
 
-The `security-standards` gate is loaded into the session through the `GATES.md` import in the repo's `CLAUDE.md`; it holds the full pattern reference, severity table, and checklists. If it isn't in context, read `~/.claude/plugins/marketplaces/rn-ways-of-working/gates/security-standards.md`. Use it to guide the review.
+The `security-standards` gate is loaded into the session through the `GATES.md` import in the repo's `CLAUDE.md`; it holds the full pattern reference and severity table. If it isn't in context, read `~/.claude/plugins/marketplaces/rn-ways-of-working/gates/security-standards.md`. Use it to guide the review.
 
 ## Review workflow
 

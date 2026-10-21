@@ -17,8 +17,6 @@ const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_P
 - Only the new key names exist in a repo: `sb_publishable_…` in the app, `sb_secret_…` on the server. The legacy key pair Supabase deprecates at the end of 2026 must not appear.
 - No hardcoded keys, tokens, or passwords anywhere. `.env*` files are gitignored; `.env.example` ships with empty values.
 
-**Checklist:** no secrets in the bundle · publishable key only in the app · secret key only in Edge Functions · legacy key names absent · `.env*` gitignored.
-
 ## Sign-in
 
 Apple and Google only, and every app requires it. The sign-in screen says in one line why an account is needed (your data syncs across devices) and links the privacy and support pages; the App Review notes say the same. Email sign-up is off: `enable_signup = false` under `[auth.email]` in `config.toml`, and the Email provider disabled in the dashboard. The calls live in `lib/api/auth.ts`.
@@ -41,8 +39,6 @@ export const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env
 - **Escalation rule:** an app handling health, finance, or similarly sensitive data stores the session with Supabase's documented `LargeSecureStore` pattern (an AES key in `expo-secure-store`, the encrypted session in AsyncStorage). Copy that pattern verbatim from Supabase's Expo guide; Supabase warns that "optimising" it introduces subtle vulnerabilities. Such an app also keeps its sensitive queries out of the persisted cache (`dehydrateOptions.shouldDehydrateQuery`) and sets `android.allowBackup: false`.
 - `kvStorage` (`expo-sqlite/kv-store`) holds non-sensitive state: the query cache, settings, review-prompt counters. Anything secret a user types in (a key to a service they own) goes in `expo-secure-store`.
 - No token ever lands in a Zustand store, a log line, or a component prop.
-
-**Checklist:** session via the `expo-sqlite` shim (or the Keychain pattern for sensitive apps) · `autoRefreshToken` tied to `AppState` · no tokens in stores or logs.
 
 ## Input & deep-link validation
 

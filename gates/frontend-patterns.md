@@ -15,10 +15,10 @@ Every component file defines exactly one component. Sub-components get their own
 ```tsx
 // PASS — components/Workout/WorkoutList.tsx owns logic, composes children
 const WorkoutList = () => {
-  const { data, isPending, error, refetch } = useWorkouts()
+  const { data, isPending, refetch } = useWorkouts()
 
   if (isPending) return <WorkoutListSkeleton />
-  if (error) return <ErrorState message="Couldn't load workouts" onRetry={refetch} />
+  if (!data) return <ErrorState message="Couldn't load workouts" onRetry={refetch} />
 
   const workouts = data.pages.flatMap((page) => page.data)
   if (workouts.length === 0) return <EmptyState message="No workouts yet" />
@@ -226,7 +226,7 @@ Multi-step wizards use a **single RHF instance at the parent**, shared via `Form
 
 ## Loading, Empty, and Error States
 
-Every screen that loads data handles **loading, empty, error** explicitly, in that priority order off the query object (`isPending`, `error`, empty `data` — see `WorkoutList` above). Skeletons sit next to the component they shadow, match its shape, and are built from the Reusables `Skeleton`. Mutations do the same: pending off `mutation.isPending` (submit disabled), success (toast / navigate), error (inline or toast). Optimistic updates are opt-in and owned by `tanstack-query` §8.
+Every screen that loads data handles **loading, error, empty** explicitly, in that order off the query object: `isPending`, then no `data`, then empty `data` (`WorkoutList` above). Test `data`, not `error`: a failed background refetch sets `error` but keeps the cached rows, and they stay on screen. Skeletons sit next to the component they shadow, match its shape, and are built from the Reusables `Skeleton`. Mutations do the same: pending off `mutation.isPending` (submit disabled), success (toast / navigate), error (inline or toast). Optimistic updates are opt-in and owned by `tanstack-query` §8.
 
 ## Lists — `FlatList`, not `.map`
 
