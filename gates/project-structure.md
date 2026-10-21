@@ -1,76 +1,60 @@
 # Project Structure
 
-The shape of a React Native project: a **pnpm workspace monorepo** with an Expo app, a Node/Express API, and shared code. `pnpm` is the package manager everywhere — never `npm` or `yarn`. Every install is `pnpm add`, every script is `pnpm <script>`, every workspace command is `pnpm --filter <pkg> <script>`.
+The shape of a React Native project: **one git repo per app**, holding an Expo app, that app's Supabase project, and nothing else. No workspace, no monorepo, no API server. `pnpm` is the package manager — never `npm`, `yarn` or `bun`. Expo SDK packages install with `pnpm expo install <pkg>`, which picks the version the SDK supports; everything else is `pnpm add`. Every script is `pnpm <script>`, every one-off CLI `pnpm dlx`.
 
-## Monorepo Layout
+Shared code does not travel between apps as a package; every app starts from the same baseline (Starting an app, below), and these gates keep every app the same shape.
+
+## Repo Layout
 
 ```
 .
-├── apps/
-│   ├── mobile/                 # Expo app (Expo Router)
-│   └── api/                    # Node/Express API (see backend-patterns)
-├── packages/
-│   └── shared/                 # Cross-app code: Zod schemas, domain types, generated DB types
-├── supabase/                   # Supabase CLI project (created by `supabase init`) — see database-standards
-│   ├── config.toml             # local stack + project config
-│   ├── migrations/             # YYYYMMDDhhmmss_*.sql — the schema, in code
-│   └── seed.sql                # local seed data
-├── pnpm-workspace.yaml
-├── package.json                # root scripts only; deps live in the workspaces
-└── tsconfig.base.json          # shared compiler options, extended by each workspace
-```
-
-`packages/shared` is the home for anything both the app and the API need — most importantly the **Zod schemas and inferred types** for API payloads (so the client and server validate against one definition), and the **generated database types** (`supabase gen types` output). A schema used by both sides lives here, never duplicated.
-
-### `supabase/` lives at the repo root
-
-The Supabase CLI operates on the `supabase/` directory in the current working directory, so it lives at the **repo root** — that's what makes `supabase link` / `supabase db push` / `supabase db reset` work without any `--workdir` juggling. The database is shared infrastructure: the API queries it, and the app talks to Supabase directly for auth, so neither app "owns" it. Run all `supabase` commands from the repo root, and wrap the common ones as root `package.json` scripts (`pnpm db:push`, `pnpm db:reset`, `pnpm db:types`). The full migration workflow lives in `database-standards`.
-
-## Expo App Layout (`apps/mobile`)
-
-Expo Router is **file-based**: the route tree *is* the `app/` directory. Everything that isn't a route lives in `src/`, grouped by kind.
-
-```
-apps/mobile/
 ├── app/                        # Expo Router routes — the file tree is the navigation tree
-│   ├── _layout.tsx             # Root layout: providers + auth gate (Stack.Protected)
-│   ├── (auth)/                 # Route group — signed-out screens
+│   ├── _layout.tsx             # Root layout: the providers; renders AppShell, which holds the auth gate
+│   ├── (auth)/
 │   │   ├── _layout.tsx
-│   │   ├── sign-in.tsx
-│   │   └── sign-up.tsx
-│   ├── (tabs)/                 # Route group — signed-in tab navigator
-│   │   ├── _layout.tsx         # Tabs layout
+│   │   └── sign-in.tsx         # Apple (iOS) + Google buttons, and why an account is needed
+│   ├── (tabs)/
+│   │   ├── _layout.tsx         # NativeTabs
 │   │   ├── index.tsx           # Home tab
-│   │   └── workouts/
-│   │       ├── index.tsx       # /workouts list
-│   │       └── [id].tsx        # /workouts/:id dynamic route
+│   │   ├── workouts/
+│   │   │   ├── _layout.tsx     # Stack — a tab that pushes screens needs its own
+│   │   │   ├── index.tsx       # /workouts list
+│   │   │   └── [id].tsx        # /workouts/:id
+│   │   └── settings.tsx        # Settings tab: every row store-and-monetisation requires
+│   ├── +native-intent.tsx      # maps the OAuth redirect path to / (see security-standards)
 │   └── +not-found.tsx
 ├── src/
-│   ├── components/             # UI components (each in its own folder)
-│   │   └── ui/                 # gluestack-ui copy-in primitives (kebab-case, owned by the CLI)
-│   ├── hooks/                  # Generic UI hooks flat (useDebounce.ts); per-domain TanStack folders below
-│   │   ├── useDebounce.ts      # cross-cutting hooks stay flat
-│   │   └── workouts/           # a TanStack domain's React-Query layer (see tanstack-query)
-│   │       ├── workouts.cache.ts        # query keys + stale times + queryOptions factories
-│   │       ├── useWorkouts.ts           # one query hook per file (useWorkout.ts, …)
-│   │       ├── useCreateWorkout.ts      # one mutation hook per file
-│   │       └── prefetchWorkoutQueries.ts # warms the domain on sign-in
-│   ├── stores/                 # Zustand stores (useSessionStore.ts)
-│   ├── providers/              # React Context providers (cross-cutting client state)
-│   ├── lib/                    # Non-React utilities + integrations
-│   │   ├── api/                # Network layer — client.ts (envelope unwrap + auth) + one fetcher file per domain (see tanstack-query)
-│   │   ├── queryClient.ts      # createAppQueryClient() — global TanStack defaults (see tanstack-query)
+│   ├── components/             # UI components, each in its own folder (see below)
+│   │   ├── AppShell/           # the auth gate and every app-lifetime effect (see Routes below)
+│   │   └── ui/                 # React Native Reusables copy-in primitives (kebab-case, owned by its CLI)
+│   ├── hooks/                  # Cross-cutting hooks flat (useSession.ts, useDebounce.ts)
+│   │   └── workouts/           # one folder per TanStack domain (see tanstack-query)
+│   ├── lib/                    # Non-React utilities and integrations
+│   │   ├── env.ts              # Validated EXPO_PUBLIC_* access (see frontend-patterns)
+│   │   ├── supabase.ts         # The typed Supabase client (see security-standards)
+│   │   ├── storage.ts          # kvStorage — expo-sqlite/kv-store for Zustand and the query cache
+│   │   ├── queryClient.ts      # createAppQueryClient() + queryPersister (see tanstack-query)
 │   │   ├── prefetch.ts         # prefetchInitialData() — the sign-in prefetch registry
-│   │   ├── time.ts             # seconds() / minutes() duration helpers for stale times
-│   │   ├── supabase.ts         # Supabase client (storage adapter, auth config)
-│   │   └── env.ts              # Validated EXPO_PUBLIC_* access (see frontend-patterns)
-│   └── types/                  # App-local cross-file types
+│   │   ├── time.ts             # seconds() / minutes() / hours()
+│   │   ├── version.ts          # isVersionBelow() for min_supported_version
+│   │   └── api/                # Network layer: dataError.ts + one fetcher file per domain
+│   ├── schemas/                # Zod schemas, singular: workout.schema.ts
+│   ├── stores/                 # Zustand stores: use<Name>Store.ts
+│   ├── providers/              # React Context providers (cross-cutting client state)
+│   ├── constants/              # Cross-file constants: ads.ts, breakpoints.ts
+│   └── types/                  # database.types.ts (generated) + singular domain types: workout.types.ts
+├── supabase/                   # Supabase CLI project — see database-standards and edge-functions
+│   ├── config.toml
+│   ├── migrations/             # YYYYMMDDhhmmss_<description>.sql — the schema, in code
+│   ├── seed.sql
+│   └── functions/              # Edge Functions: <name>/index.ts + _shared/
 ├── assets/
-├── global.css                  # NativeWind / Tailwind entry point
-├── tailwind.config.js
-├── metro.config.js             # wrapped with withNativeWind
-├── babel.config.js             # babel-preset-expo + nativewind
-└── app.json                    # Expo config (scheme, typedRoutes, plugins)
+├── .github/workflows/ci.yml    # typecheck, lint, test, migrations
+├── global.css                  # Tailwind v4 + Uniwind + the app's theme variables
+├── metro.config.js             # withUniwindConfig — the outermost wrapper
+├── app.json                    # Expo config; app.config.ts only when a value must come from env
+├── eas.json                    # build profiles, remote app version source
+└── package.json
 ```
 
 ### Routes live in `app/`, everything else in `src/`
@@ -78,38 +62,76 @@ apps/mobile/
 The `app/` directory is **routing only**. A file in `app/` is a screen; its job is to read route params, mount a layout, and compose components and hooks from `src/`. No business logic, no large render trees, no large state in a route file — if a screen file grows past ~100 lines, the logic moves to a hook (`src/hooks/`) and the rendering to components (`src/components/`).
 
 - **Route groups** `(name)/` organise screens without adding a URL segment — use them to split signed-in vs signed-out stacks.
-- **Layouts** `_layout.tsx` define the navigator (Stack / Tabs) and wrap providers. The root `_layout.tsx` is where the auth gate lives.
+- **Layouts** `_layout.tsx` define the navigator (`Stack` / `NativeTabs`) and wrap providers. The root `_layout.tsx` mounts the providers and renders `AppShell` (its hooks need those providers above them). `AppShell` holds the auth gate and every app-lifetime effect: the splash screen, `focusManager` and Supabase auto-refresh on `AppState`, `configurePurchases()` and `prefetchInitialData()` once a session exists, `initialiseAds()`, and `UpdateRequired` in place of the app when the version is too old.
 - **Dynamic routes** `[id].tsx` read their param with `useLocalSearchParams`.
+- **One screen file serves iOS and Android.** A small difference is a `Platform.OS` check in place (the Apple sign-in button renders on iOS only; `expo-apple-authentication` has no Android). A component that diverges wholesale gets a `Name.ios.tsx` beside the default `Name.tsx`, and Metro picks per platform. Never a second screen per platform.
 
 ### Components — each in its own folder
 
 Every component in `src/components/` lives in a folder named after it, the file inside matching the folder name:
 
-- **Standalone** — `components/SiteHeader/SiteHeader.tsx`.
+- **Standalone** — `components/AdBanner/AdBanner.tsx`.
 - **Domain group** (2+ peers sharing a prefix) — `components/Workout/WorkoutRow.tsx`, `components/Workout/WorkoutStatsBanner.tsx`. Keep the domain prefix on the filename so imports stay self-describing.
-- **Compound family** (one component with internal sub-components) — `components/Calendar/Calendar.tsx` (parent) + `components/Calendar/CalendarDay.tsx` (child, prefix stripped). Driven by composition, not domain count.
+- **Compound family** (one component with internal sub-components) — `components/Calendar/Calendar.tsx` (parent) + `components/Calendar/CalendarDay.tsx` (child, keeps the prefix). Driven by composition, not domain count.
 
-One exception: **`components/ui/`** holds gluestack-ui's copy-in primitives flat in kebab-case (`button.tsx`, `box.tsx`) — that layout is owned by the gluestack CLI; don't reformat it or put bespoke components there.
+**A screen's own components** are a domain group named after the screen. The route file renders the sections; a section's children sit beside it as peers with the same prefix, because folders under `components/` never nest. A component a second screen needs moves up to its own folder or its domain's group.
+
+```
+app/(tabs)/index.tsx                     # the Home screen: calls hooks, renders the sections
+components/Home/HomeHeader.tsx
+components/Home/HomeStats.tsx
+components/Home/HomeStatTile.tsx         # HomeStats' child — a peer, not a subfolder
+components/Home/HomeRecentWorkouts.tsx
+components/Workout/WorkoutRow.tsx        # the Workouts tab uses it too, so not under Home/
+```
+
+One exception: **`components/ui/`** holds React Native Reusables' copy-in primitives flat in kebab-case (`button.tsx`, `text.tsx`, `input.tsx`). That layout is owned by the Reusables CLI (`pnpm dlx @react-native-reusables/cli@latest add <component>`; it picks the Uniwind versions when it detects Uniwind's Metro config, so check the added files import nothing from `nativewind`); the files are yours to edit, but don't reformat the folder or put bespoke components there.
 
 ## File Naming
 
 ```
-app/(tabs)/workouts/[id].tsx     # routes — lower-case, Expo Router conventions
-components/WorkoutCard/WorkoutCard.tsx   # PascalCase folder + file for components
-hooks/useAuth.ts                 # camelCase, 'use' prefix — cross-cutting hooks, flat
-hooks/workouts/workouts.cache.ts # per-domain query keys + queryOptions (see tanstack-query)
-hooks/workouts/useWorkouts.ts    # per-domain query/mutation hook — one per file
-stores/useSessionStore.ts        # camelCase, 'use' prefix, 'Store' suffix
-lib/formatDuration.ts            # camelCase for utilities
-lib/api/workouts.ts              # network fetchers — camelCase, plural resource, no Api suffix
-types/workout.types.ts           # camelCase with .types suffix
+app/(tabs)/workouts/[id].tsx              # routes — lower-case, Expo Router conventions
+components/AdBanner/AdBanner.tsx          # PascalCase folder + file for components
+components/ui/button.tsx                  # Reusables primitives — kebab-case, CLI-owned
+hooks/useSession.ts                       # camelCase, 'use' prefix — cross-cutting hooks, flat
+hooks/workouts/workouts.cache.ts          # per-domain query keys + queryOptions (see tanstack-query)
+stores/useSettingsStore.ts                # camelCase, 'use' prefix, 'Store' suffix
+lib/api/workouts.ts                       # network fetchers — camelCase, plural resource, no Api suffix
+schemas/workout.schema.ts                 # Zod schemas — camelCase with .schema suffix
+types/workout.types.ts                    # domain types + row mappers — .types suffix
+types/database.types.ts                   # generated by supabase gen types; committed, never edited
+supabase/functions/revenuecat-webhook/index.ts   # Edge Functions — kebab-case folder, index.ts entry
 ```
+
+## `supabase/` lives at the repo root
+
+The Supabase CLI works on the `supabase/` directory in the current working directory, so it lives at the **repo root** and every `supabase` command runs from there, wrapped as `package.json` scripts. Every app has the same script names: `dev`, `typecheck`, `lint`, `test`, `db:start`, `db:reset`, `db:check`, `db:push`, `db:types`, `build:ios`, `build:android`, `submit:ios`, `submit:android`. The migration workflow lives in `database-standards`; the functions layout in `edge-functions`; the release path in `store-and-monetisation`.
+
+## Starting an app
+
+Every app starts from the same baseline, so no two differ in setup:
+
+1. `pnpm create expo-app@latest <name> --template default` (the current SDK, Expo Router, TypeScript). Delete the example screens, move code under `src/`, and set `strict`, `noUncheckedIndexedAccess` and the `@/*` alias in `tsconfig.json`.
+2. Uniwind, then React Native Reusables, each from its own install guide (`global.css`, `withUniwindConfig` outermost in `metro.config.js`).
+3. Tests use the `jest-expo` preset with `@testing-library/react-native`; `pnpm expo lint` writes the `eslint-config-expo` flat config; `eas-cli` is a dev dependency, so every `eas` call runs the project's version (`pnpm exec eas …`).
+4. `supabase init`, then the skeleton migrations (`database-standards`).
+5. `.github/workflows/ci.yml` on every push: `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm lint`, `pnpm test`, then `supabase start` and `pnpm db:check`, checked out with full history (`fetch-depth: 0`).
+
+## The `app-sites` repo
+
+App repos are private, and GitHub Pages is free only for public repos, so the pages the stores require live in **one public repo, `app-sites`**, served at your `github.io` address. It holds `index.md` and one folder per app:
+
+```
+app-sites/
+├── index.md
+└── <app-slug>/
+    ├── privacy.md          # App Store Connect + Play Console privacy policy URL
+    ├── support.md          # App Store Connect support URL
+    └── delete-account.md   # Play Console account-deletion URL; the in-app path and an email route
+```
+
+The folder is added when the app is set up; the repo is created once, the first time.
 
 ## Path Aliases
 
-Import via the `@/` alias (configured in `tsconfig` + babel module-resolver), never deep relative paths, so a reader can locate the source without tracing `../../`. Cross-app code imports from the `shared` workspace package by its package name.
-
-```typescript
-import { useSessionStore } from '@/stores/useSessionStore'
-import { createWorkoutSchema } from '@acme/shared/schemas/workout'
-```
+Import via the `@/` alias (`@/*` → `src/*` in `tsconfig.json`) — `import { useSession } from '@/hooks/useSession'` — never deep relative paths. Route files import from `src/` the same way.

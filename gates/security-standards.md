@@ -1,114 +1,115 @@
 # Security Standards
 
-Security rules for a React Native (Expo) app backed by a Node API and Supabase. Mobile changes the threat model from the web: the app bundle ships to the user's device and can be unpacked, so **nothing secret survives in the client**. The API and Supabase RLS are where trust actually lives.
+Security rules for a React Native (Expo) app talking straight to Supabase. Mobile changes the threat model from the web: the app bundle ships to the user's device and can be unpacked, so **nothing secret survives in the client**. There is no API server in front of the database — Supabase RLS and the few Edge Functions are where trust actually lives.
 
 ## Secrets — nothing secret lives in the app
 
 ```typescript
-// FAIL — service-role key in the app. EXPO_PUBLIC_* ships to every device.
-const supabase = createClient(url, process.env.EXPO_PUBLIC_SUPABASE_SERVICE_ROLE_KEY)
+// FAIL — a secret in the app. EXPO_PUBLIC_* ships to every device.
+const supabase = createClient(url, process.env.EXPO_PUBLIC_SUPABASE_SECRET_KEY)
 
-// PASS — the app only ever holds the anon/publishable key (it's designed to be public, RLS guards the data)
-const supabase = createClient(url, env.EXPO_PUBLIC_SUPABASE_ANON_KEY)
+// PASS — the app only ever holds the publishable key (designed to be public; RLS guards the data)
+const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, { auth: { /* below */ } })
 ```
 
-- Anything `EXPO_PUBLIC_*` is **readable by anyone with the app** — treat it as published. The Supabase anon key is meant to be public; a service-role key, API signing secret, or third-party server key is not and lives **only on the Node API**.
-- No hardcoded keys, tokens, or passwords anywhere. `.env*` files are gitignored; no secrets in git history.
-- Server secrets are configured on the API host (and EAS secrets for build-time native config), never bundled into the app.
+- Anything `EXPO_PUBLIC_*` is **readable by anyone with the app** — treat it as published. Public by design: the Supabase publishable key, RevenueCat's public SDK keys, AdMob app and unit IDs. They identify; they don't authorise.
+- The Supabase **secret key**, webhook secrets, and any third-party server key live **only in Edge Function secrets** (`edge-functions`). Never in `EXPO_PUBLIC_*`, never in `app.json`, never in git.
+- Only the new key names exist in a repo: `sb_publishable_…` in the app, `sb_secret_…` on the server. The legacy key pair Supabase deprecates at the end of 2026 must not appear.
+- No hardcoded keys, tokens, or passwords anywhere. `.env*` files are gitignored; `.env.example` ships with empty values.
 
-**Checklist:** no hardcoded secrets · only the anon/publishable key in the app · service-role and third-party secrets API-only · `.env*` gitignored.
+## Sign-in
 
-## Token & sensitive-data storage
+Apple and Google only, and every app requires it. The sign-in screen says in one line why an account is needed (your data syncs across devices) and links the privacy and support pages; the App Review notes say the same. Email sign-up is off: `enable_signup = false` under `[auth.email]` in `config.toml`, and the Email provider disabled in the dashboard. The calls live in `lib/api/auth.ts`.
+
+- **Apple, iOS only:** `AppleAuthentication.signInAsync({ requestedScopes: [FULL_NAME, EMAIL] })` → once `credential.identityToken` is non-null, `supabase.auth.signInWithIdToken({ provider: 'apple', token })`. Apple sends the name only on the first sign-in; save it to `profile.display_name` then. Every bundle id the app ships under goes in the Supabase Apple provider's Client IDs. An Apple account can't sign in on Android, and that is accepted: Android shows Google only.
+- **Google, both platforms, in the browser:** `signInWithOAuth({ provider: 'google', options: { redirectTo, skipBrowserRedirect: true } })` → `WebBrowser.openAuthSessionAsync(data.url, redirectTo)` → `exchangeCodeForSession(code)` from the returned URL. `redirectTo` is `Linking.createURL('auth/callback')`, listed in the dashboard's Redirect URLs and `config.toml`'s `additional_redirect_urls`; `app/+native-intent.tsx` maps that URL (host `auth`, path `/callback` on the custom scheme) to `/` and never throws, so Android's copy of the redirect never hits the not-found screen. No native Google SDK: the free one runs on Android sign-in APIs Google has deprecated.
+
+## Session & device storage
 
 ```typescript
-// FAIL — auth tokens / PII in AsyncStorage (unencrypted plaintext on disk)
-await AsyncStorage.setItem('accessToken', token)
+// PASS — lib/supabase.ts: the session persists in the app sandbox through expo-sqlite's localStorage shim
+import 'expo-sqlite/localStorage/install'
 
-// PASS — encrypted at rest via the OS keystore / keychain
-import * as SecureStore from 'expo-secure-store'
-await SecureStore.setItemAsync('accessToken', token)
+export const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, {
+  auth: { storage: globalThis.localStorage, persistSession: true, autoRefreshToken: true, detectSessionInUrl: false, flowType: 'pkce' },
+})
 ```
 
-- **Auth tokens, refresh tokens, and any PII go in `expo-secure-store`** (iOS Keychain / Android Keystore), never AsyncStorage. AsyncStorage is fine for non-sensitive UI state (theme, last tab).
-- Back the **Supabase client's session storage with a SecureStore adapter** so the persisted session is encrypted. SecureStore has a ~2KB per-value limit on Android — if a session exceeds it, chunk it or store only the refresh token securely.
-- Configure the Supabase client with `autoRefreshToken: true`, `persistSession: true`, `detectSessionInUrl: false`, and pause/resume auto-refresh on `AppState` so tokens refresh in the foreground.
-
-**Checklist:** tokens/PII in SecureStore not AsyncStorage · Supabase session storage encrypted · no sensitive data in plaintext on disk.
+- **The default is the app sandbox**, which iOS and Android encrypt at rest per app — what Expo's own Supabase integration sets up. `AppShell`'s `AppState` listener calls `startAutoRefresh()` / `stopAutoRefresh()` through `lib/api/auth.ts`, so tokens refresh in the foreground.
+- **Escalation rule:** an app handling health, finance, or similarly sensitive data stores the session with Supabase's documented `LargeSecureStore` pattern (an AES key in `expo-secure-store`, the encrypted session in AsyncStorage). Copy that pattern verbatim from Supabase's Expo guide; Supabase warns that "optimising" it introduces subtle vulnerabilities. Such an app also keeps its sensitive queries out of the persisted cache (`dehydrateOptions.shouldDehydrateQuery`) and sets `android.allowBackup: false`.
+- `kvStorage` (`expo-sqlite/kv-store`) holds non-sensitive state: the query cache, settings, review-prompt counters. Anything secret a user types in (a key to a service they own) goes in `expo-secure-store`.
+- No token ever lands in a Zustand store, a log line, or a component prop.
 
 ## Input & deep-link validation
 
 ```typescript
-// PASS — Zod-validate every external input, including route/deep-link params
+// PASS — Zod-validate every external input, including route/deep-link params; hooks before any return
 const { id } = useLocalSearchParams<{ id: string }>()
-const parsed = z.string().uuid().safeParse(id)
-if (!parsed.success) return <NotFound />
+const workoutId = z.uuid().safeParse(id).data
+const query = useWorkout(workoutId)
+if (!workoutId) return <NotFound />
 ```
 
-- All user input, API responses, and **deep-link / route params** are validated with Zod before use — a deep link is attacker-controllable input.
-- Validate API responses at the boundary; a compromised or buggy upstream shouldn't crash the app with an unexpected shape.
+- All user input, **deep-link / route params**, Edge Function payloads, and `app_config` values are validated with Zod before use — a deep link is attacker-controllable input, and a config row was typed by hand.
 - Whitelist, don't blacklist. Error messages don't leak sensitive info.
-
-**Checklist:** all inputs Zod-validated · deep-link params validated · API responses validated at the boundary.
 
 ## Authorisation — RLS is the floor
 
-Authorisation lives on the server, never in the app. The client deciding "this user is an admin, show the button" is a UX nicety, not a security control — a modified client skips it.
+Authorisation lives in the database, never in the app. The client deciding "this user is pro, show the button" is a UX nicety, not a security control — a modified client skips it.
 
-- **RLS enabled on every table with user data** (see `database-standards`). It's the enforcement that survives a tampered client.
-- The Node API re-checks authorisation in the service layer; never trust a role or user id sent from the app — read identity from the verified JWT (`req.user.id`).
-- Sensitive operations are gated on the server before they execute, not hidden in the UI.
-
-**Checklist:** RLS on all user tables · server-side authz on sensitive operations · identity read from the verified JWT, never the request body.
+- **RLS enabled on every table** with per-action policies (see `database-standards`). It's the enforcement that survives a tampered client, and with no API in front of Postgres it is the only one.
+- **The Supabase client is imported only in `lib/api/`** (`tanstack-query` → the seam). A `supabase.from()` in a component is a review failure because it is where ad-hoc, unreviewed access starts.
+- **Edge Functions verify their caller** and take identity from the verified token (`edge-functions`).
+- **Privileged operations** (account deletion, anything touching `auth.users`) are `SECURITY DEFINER` functions that act on `auth.uid()` and nothing else.
 
 ## Injection
 
 ```typescript
-// PASS — Supabase parameterises automatically
-const { data } = await supabase.from('user').select('id, name').eq('email', userEmail)
+// PASS — the typed builder parameterises automatically
+const { data } = await supabase.from('workout').select('id, name').eq('id', workoutId)
 
-// FAIL — string-built SQL
-const query = `SELECT * FROM "user" WHERE email = '${userEmail}'`
+// FAIL — string-built SQL anywhere, including inside an RPC body
+const query = `SELECT * FROM workout WHERE id = '${workoutId}'`
 ```
 
-Never compose SQL as a string. The Supabase client parameterises; genuine raw-SQL needs go in a Postgres function (RPC). For `ILIKE` patterns, escape `%`, `_`, `\` in user input before interpolating into the pattern.
+Never compose SQL as a string. Genuine raw-SQL needs go in a Postgres function with typed parameters. For `ILIKE` patterns, escape `%`, `_`, `\` in user input and strip `*`, which PostgREST reads as a wildcard and can't escape. Never let the user choose a column, table, or operator without an allow-list.
+
+## Ads & tracking
+
+- **Consent before any ad request.** `initialiseAds()` (`store-and-monetisation`) runs the consent form first, asks App Tracking Transparency only when consent allows it, and initialises the SDK last. No `BannerAd` renders before it resolves.
+- **No analytics or crash SDK ships by default.** Adding one later is a privacy-manifest and App Store privacy-label change, not a drop-in.
 
 ## Transport & platform
 
-- **HTTPS only.** No cleartext traffic — keep `usesCleartextTraffic` off (Android) and ATS on (iOS). The API is TLS-only.
-- Set `autoCapitalize="none"` and `secureTextEntry` on credential inputs; disable autofill/screenshots on sensitive screens where the platform allows.
-- Keep Expo SDK and native dependencies current; run `pnpm audit` and address high-severity advisories. Don't ship `expo-dev-client` or debug-only tooling in production builds.
-- Validate and constrain file uploads on the API (size limit, MIME allow-list, sanitised filename) — see `backend-patterns`.
+- **HTTPS only.** No cleartext traffic — keep `usesCleartextTraffic` off (Android) and ATS on (iOS).
+- Set `autoCapitalize="none"` and `secureTextEntry` on credential-like inputs; disable screenshots on sensitive screens where the platform allows.
+- Keep the Expo SDK and native dependencies current; run `pnpm audit` and address high-severity advisories. Production builds carry no debug-only tooling (EAS strips `expo-dev-client` from them).
+- **Supabase Storage buckets are private** with signed URLs of 15 minutes or less. Each user's files live under a `<user id>/` folder, with `storage.objects` policies on `(storage.foldername(name))[1] = (SELECT auth.uid())::text`. File size and MIME allow-list are bucket settings; filenames are generated (`crypto.randomUUID()`), never the user's.
 
 ## Sensitive data exposure
 
-```typescript
-// FAIL — logging secrets / full payloads (logs may ship to a crash reporter)
-console.log('login', { email, password, token })
-
-// PASS — shaped, redacted
-console.log('login', { userId })
-```
-
-- No passwords, tokens, or keys in logs — and remember device logs and crash reporters (Sentry) capture `console` output. Scrub PII before it reaches a reporter.
-- Error messages shown to the user are generic; detailed errors stay in server logs. Never surface a stack trace in the app.
-
-**Checklist:** no secrets/PII in logs or crash reports · generic user-facing errors · no stack traces in the app.
+- Log shaped fields — `console.log('[auth][signed-in]', { userId })` — never a session, token, key, password or whole payload; device logs reach store crash reports. Scrub PII first.
+- Error messages shown to the user are generic; detail stays in Edge Function logs. Never surface a stack trace in the app.
 
 ## Flag Immediately
 
 | Pattern | Severity | Fix |
 |---|---|---|
-| Service-role / server secret in `EXPO_PUBLIC_*` | CRITICAL | Move to the API; app holds anon key only |
-| Auth token in AsyncStorage | HIGH | Use `expo-secure-store` |
-| Authorisation decided only in the app | CRITICAL | Enforce on the server + RLS |
-| Table with user data, RLS disabled | CRITICAL | Enable RLS, write policies |
-| String-concatenated SQL | CRITICAL | Parameterised query / RPC |
+| Secret key, webhook secret or third-party server key in `EXPO_PUBLIC_*` or the bundle | CRITICAL | Move to Edge Function secrets |
+| Authorisation decided only in the app | CRITICAL | RLS policy, or a `SECURITY DEFINER` function scoped to the caller |
+| Table with user data, RLS disabled or no policies | CRITICAL | Enable RLS, write per-action policies |
+| String-concatenated SQL | CRITICAL | Typed builder / RPC with parameters |
+| Webhook handler without a secret check | CRITICAL | Compare the shared secret on every request |
+| Legacy API keys (`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, an `eyJ…` key) in a new repo | HIGH | Publishable and secret keys; the `anon` Postgres role is current |
+| Supabase client imported outside `lib/api/` | HIGH | Move the call into a fetcher |
+| Function without `REVOKE … FROM public, anon, authenticated`, or a table without explicit grants | HIGH | Revoke, then grant one role (`database-standards`) |
 | Unvalidated deep-link param used in a query/navigation | HIGH | Zod-validate before use |
+| Ad request before the consent form resolves | HIGH | Gate on `initialiseAds()` |
 | Cleartext HTTP traffic | HIGH | HTTPS only |
 | Logging tokens / passwords / full bodies | MEDIUM | Redact, log shaped fields |
 
 ## Common False Positives
 
-- The Supabase **anon/publishable** key in the app (it's designed to be public; RLS guards the data).
+- The Supabase **publishable** key, RevenueCat public SDK keys and AdMob IDs in the app — public by design; RLS and the stores guard the data and the money.
 - Values in `.env.example` (placeholders, not real secrets).
 - Test credentials in test files, clearly marked.

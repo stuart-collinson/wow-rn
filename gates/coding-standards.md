@@ -1,6 +1,6 @@
 # Coding Standards & Best Practices
 
-Universal coding standards for React Native (Expo) + TypeScript projects. The principles are language-agnostic; examples are TypeScript because that's the stack. Anything tied to React Native, Expo Router, or a specific layer lives in `frontend-patterns.md`, `backend-patterns.md`, or `database-standards.md`, not here.
+Universal coding standards for React Native (Expo) + TypeScript projects. The principles are language-agnostic; examples are TypeScript because that's the stack. Anything tied to React Native, Expo Router, or a specific layer lives in `frontend-patterns.md`, `edge-functions.md`, or `database-standards.md`, not here.
 
 ## Core Principles
 
@@ -97,7 +97,7 @@ const handle = (input: unknown): Result => {
 }
 ```
 
-`unknown` forces narrowing before use — that's the point. `any` switches type-checking off and is never the answer. Run with `strict: true`.
+`unknown` forces narrowing before use — that's the point. `any` switches type-checking off and is never the answer. Run with `strict: true` and `noUncheckedIndexedAccess: true` — `array[i]` is `T | undefined`, narrow before use.
 
 ### Explicit return types — but only when they document something
 
@@ -106,7 +106,7 @@ Annotate the return type when it tells the reader something the body doesn't mak
 ```typescript
 // PASS — annotation documents the value
 const formatDuration = (seconds: number): string => `${Math.round(seconds / 60)}m`
-const useWorkouts = (): { workouts: Workout[]; isLoading: boolean } => { }
+const useDebounce = <T>(value: T, delayMs: number): T => { }
 
 // PASS — nothing to document, no annotation
 const WorkoutCard = ({ workout }: Props) => <Text>{workout.name}</Text>
@@ -128,7 +128,7 @@ function fetchData(url: string) { }
 export default function Screen() { }  // use an arrow function assigned to a const
 ```
 
-Exception: methods inside a `class` use method syntax (relevant on the backend; classes are rare in the app).
+Exception: methods inside a `class` use method syntax (classes are rare; the error classes in `lib/api/dataError.ts` are the ones you will meet).
 
 ## Control Flow — guard clauses
 
@@ -257,7 +257,7 @@ type CreateWorkoutInput = z.infer<typeof createWorkoutSchema>
 
 // Non-throwing flow for user input
 const result = createWorkoutSchema.safeParse(input)
-if (!result.success) return showErrors(result.error.flatten())
+if (!result.success) return showErrors(z.flattenError(result.error))
 await createWorkout(result.data)
 ```
 

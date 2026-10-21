@@ -18,8 +18,10 @@ work. Flag any conflict rather than silently picking one.
 
 @tanstack-query.md
 
-@backend-patterns.md
-
 @database-standards.md
 
+@edge-functions.md
+
 @security-standards.md
+
+@store-and-monetisation.md

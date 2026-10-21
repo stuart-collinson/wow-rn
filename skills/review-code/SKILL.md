@@ -7,7 +7,7 @@ allowed-tools: Bash(git *)
 
 # Review Code
 
-A full pre-PR review against the standards loaded in full through the `GATES.md` import in this repo's `CLAUDE.md`. If the `SessionStart` hook warned that the gates are not loaded, Read them from the gate root it names first. Follow every step in order.
+A full pre-PR review against the standards loaded in full through the `GATES.md` import in this repo's `CLAUDE.md`. If a hook warned that the gates are not loaded, Read them from the gate root it names first. Follow every step in order.
 
 ## Step 1 — Collect the full diff
 
@@ -56,16 +56,18 @@ If none: _None found._
 | TypeScript strictness (no `any`, `type` not `interface`) | | |
 | Arrow functions / no `function` keyword | | |
 | Naming conventions | | |
-| File structure (imports → types → logic → render) | | |
-| Styling (NativeWind className, no stray inline styles) | | |
-| Components (one per file, parent/child split, reuse) | | |
+| File structure (imports → types → constants → logic → render) | | |
+| Styling (Uniwind className on RN views and Reusables; Expo UI untouched by className; no raw hex) | | |
+| Components (one per file, parent/child split, reuse order respected) | | |
 | State (TanStack Query for server, Zustand for shared, RHF for forms) | | |
+| Data layer (Supabase client only in `lib/api/`, fetcher per operation, cache file + queryOptions, no barrels) | | |
 | Loading / empty / error states handled | | |
-| Lists use FlatList/FlashList | | |
-| Navigation (Expo Router typed routes, auth gate) | | |
-| API layering (routes → controller → service → repository) | | |
-| Migrations idempotent + RLS in same file | | |
-| Security (no app secrets, SecureStore, server-side authz, input/deep-link validation) | | |
+| Lists use FlatList/FlashList; no manual memoisation | | |
+| Navigation (Expo Router typed routes, NativeTabs, Stack.Protected auth gate) | | |
+| Edge Functions (portable, caller verified, secrets via getEnv, idempotent webhooks) | | |
+| Migrations idempotent + RLS and explicit grants in same file; functions revoked then granted to one role; types regenerated | | |
+| Monetisation, when enabled (AdBanner gated by app_config and consent; restore purchases present with payments) | | |
+| Security (publishable key only, session storage rule, deep-link validation, no secrets in logs) | | |
 | No unused code / near-zero comments | | |
 
 Use ✅ clean, ⚠️ minor issues, ❌ violations.

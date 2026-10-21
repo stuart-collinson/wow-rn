@@ -20,7 +20,7 @@ const root =
 const project = process.env.CLAUDE_PROJECT_DIR || process.cwd();
 const gateRoot = join(root, 'gates');
 
-const IMPORT_PATTERN = new RegExp(`^@(\\S*/${PLUGIN}/gates/${ENTRY})[ \\t]*$`, 'm');
+const IMPORT_PATTERN = new RegExp(`^[ \\t]*(?:[-*+][ \\t]+)?@(\\S*/${PLUGIN}/gates/${ENTRY})[ \\t]*$`, 'm');
 const FENCED_BLOCK = /```[\s\S]*?```/g;
 
 const expandHome = (path) => (path.startsWith('~/') ? join(homedir(), path.slice(2)) : path);
@@ -43,34 +43,56 @@ const describeProblem = (found) => {
   return null;
 };
 
-const loaded = (file) =>
+const readVersion = (pluginRoot) => {
+  const manifest = join(pluginRoot, '.claude-plugin', 'plugin.json');
+  return existsSync(manifest) ? JSON.parse(readFileSync(manifest, 'utf8')).version : null;
+};
+
+// The gates are read from the marketplace copy, which auto-update refreshes on
+// every pass; skills and hooks come from the versioned plugin cache, which only
+// moves when the version changes. The two can drift apart.
+const versionDrift = (found) => {
+  const gatesVersion = readVersion(resolve(dirname(found.target), '..'));
+  const pluginVersion = readVersion(root);
+  if (!gatesVersion || !pluginVersion || gatesVersion === pluginVersion) return '';
+  return `
+
+Version mismatch: the gates are v${gatesVersion} but this plugin's skills and hooks
+are v${pluginVersion}. Run \`claude plugin marketplace update ${PLUGIN} && claude plugin
+update ${PLUGIN}@${PLUGIN}\`, then start a new session.`;
+};
+
+const present = (found) =>
   `
 # React Native engineering standards — ${PLUGIN}
 
-The gates are loaded in full through the import in ${file}. They are rules, not
-suggestions. Where this repo's own CLAUDE.md and a gate overlap, the repo wins;
-flag any conflict rather than silently picking a side.
+${found.file} imports the gates. Claude Code expands that import only if external
+imports were approved for this project; a check on the first prompt warns if they
+did not load. They are rules, not suggestions. Where this repo's own CLAUDE.md and
+a gate overlap, the repo wins; flag any conflict rather than silently picking a side.${versionDrift(found)}
 `.trim();
 
 const warning = (problem) =>
   `
-# WARNING — ${PLUGIN} gates are NOT loaded
+# WARNING — ${PLUGIN} gates: import line not found
 
-${problem}, so no gate text is in this session. A hook cannot carry it: Claude
-Code caps hook context at ${HOST_CONTEXT_CHAR_CAP} characters and the gates are far larger.
+${problem}. If the repo imports the gates some other way, the first-prompt check
+confirms it; otherwise no gate text is in this session. A hook cannot carry it:
+Claude Code caps hook context at ${HOST_CONTEXT_CHAR_CAP} characters and the gates are far larger.
 
-Fix: add this line to this repo's CLAUDE.md, then start a new session:
+Fix: add this line, on its own, to this repo's CLAUDE.md, then start a new session:
 
 ${IMPORT_LINE}
 
-Until then, Read each gate you need from ${gateRoot} before writing any code.
+If the gate text isn't in your context, Read each gate you need from ${gateRoot}
+before writing any code.
 
 ${readFileSync(join(gateRoot, 'ROUTING.md'), 'utf8').trim()}
 `.trim();
 
 const found = findImport();
 const problem = describeProblem(found);
-const context = problem ? warning(problem) : loaded(found.file);
+const context = problem ? warning(problem) : present(found);
 
 if (context.length > HOST_CONTEXT_CHAR_CAP) {
   throw new Error(

@@ -6,22 +6,22 @@ disable-model-invocation: true
 
 # Implement Code
 
-You are about to implement code in a React Native (Expo) project. The engineering standards are loaded in full through the `GATES.md` import in this repo's `CLAUDE.md` — apply them; do not write a line that violates them. If the `SessionStart` hook warned that the gates are not loaded, Read every gate from the gate root it names before continuing.
+You are about to implement code in a React Native (Expo) project. The engineering standards are loaded in full through the `GATES.md` import in this repo's `CLAUDE.md` — apply them; do not write a line that violates them. If a hook warned that the gates are not loaded, Read every gate from the gate root it names before continuing.
 
 ## Step 1 — Understand the request
 
 Confirm your understanding of:
 - What is being built.
-- Where it lives — a route (`app/`), a component, a hook, a store, the API (`apps/api`), or the database (a migration).
-- Whether it's app, API, database, or several.
+- Where it lives — a route (`app/`), a component, a hook, a store, a fetcher (`src/lib/api/`), an Edge Function (`supabase/functions/`), or the database (a migration).
+- Whether it's app, data layer, server-side, database, or several.
 
 ## Step 2 — Plan before you code
 
 Briefly outline:
 - Files to create or modify.
-- Types needed — local vs shared in `types/` or `packages/shared`.
+- Types needed — the generated `Database` row type plus a domain type and mapper in `src/types/`, Zod schemas in `src/schemas/`.
 - State ownership — TanStack Query (server), Zustand (shared client), RHF (forms), or `useState` (local).
-- Any security considerations (token storage, RLS, deep-link/input validation).
+- Any security considerations (keys, session storage, RLS policies, deep-link validation, consent before ads).
 
 Don't skip this. Don't write code yet.
 
@@ -37,25 +37,35 @@ Write the code. Use this checklist before outputting each file:
 - [ ] No unused code; near-zero comments
 
 **App (frontend)**
-- [ ] Styling is NativeWind `className` on RN/gluestack components — no stray inline `style` objects
-- [ ] Components from `@/components/ui` (gluestack) or `react-native`, reused before building new
+- [ ] Styling is Uniwind `className` on RN views and Reusables components — no stray inline `style` objects, no raw hex
+- [ ] Native controls from Expo UI take props, never `className`; Reusables is the only fallback
+- [ ] Components reused before built: Expo UI → `@/components/ui` → existing → composition → new
 - [ ] One component per file; parent owns logic, sub-components render
-- [ ] Server data via TanStack Query (never mirrored into Zustand); forms via RHF + Zod
+- [ ] Server data via TanStack Query hooks (never mirrored into Zustand); forms via RHF + Zod
 - [ ] Loading / empty / error states all handled; long lists use `FlatList`/`FlashList`
-- [ ] Navigation via Expo Router typed routes; auth gated in the root layout
+- [ ] Navigation via Expo Router typed routes; `NativeTabs` for tabs, each pushing tab with its own `Stack`; auth gated with `Stack.Protected` in `AppShell`
+- [ ] No hand-written memoisation (the React Compiler is on); adaptive layout at `md:` for iPad
 
-**API (backend)**
-- [ ] Four-layer split respected: routes → controller → service → repository
-- [ ] Zod `safeParse` on input; `.js` extensions on relative imports
-- [ ] Explicit columns in selects; RLS-respecting client by default
-- [ ] Standard response envelope; `DomainError` from services
+**Data layer**
+- [ ] Supabase client imported only in `src/lib/api/`; one fetcher per operation in `lib/api/<domain>.ts` with explicit columns, `unwrap`/`assertOk`, a row mapper
+- [ ] `<domain>.cache.ts` with a key factory and `queryOptions` factories; one hook per file; no barrels
+- [ ] Mutations invalidate the narrowest prefix; the auth listener clears the query client and the persister on every sign-out
+
+**Edge Functions**
+- [ ] Web-standard `Request`/`Response`, `npm:` imports; `Deno.*` only in `_shared/runtime.ts`
+- [ ] Caller verified with `verifyAuth`; identity from the token; admin client only in a job, with a comment why
+- [ ] Secrets via `getEnv`; webhooks check the shared secret and are idempotent; logs are shaped fields
 
 **Database**
-- [ ] Migration is idempotent (`IF NOT EXISTS` / `DROP … IF EXISTS` / `DO`-block guards)
-- [ ] RLS enabled + policies in the same migration; `snake_case`, singular table name
+- [ ] Migration is idempotent (`IF NOT EXISTS` / `DROP … IF EXISTS` / `DO`-block guards); `pnpm db:check` passes
+- [ ] RLS enabled + per-action policies in the same migration; explicit table grants; functions revoked from `public, anon, authenticated` then granted to one role; plan/role/credits in a read-only table; `snake_case`, singular table name; `user_id DEFAULT auth.uid()`
+- [ ] Types regenerated and committed (`pnpm db:types`)
 
 **Security**
-- [ ] No secrets in the app; tokens in SecureStore; identity from the verified JWT
+- [ ] Only the publishable key in the app; secrets only in Edge Function secrets
+- [ ] Sign-in is Apple (iOS) + Google in the browser; account deletion revokes Apple, removes uploads, then deletes
+- [ ] Session via the `expo-sqlite` shim (Keychain pattern only for sensitive apps); nothing secret in stores or logs
+- [ ] Deep-link params and `app_config` values Zod-validated; ads only after consent and `ads_enabled`
 
 ## Step 4 — Self-review
 
