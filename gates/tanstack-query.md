@@ -2,7 +2,7 @@
 
 Server state lives in **TanStack Query v5** (`@tanstack/react-query`). This gate owns the data layer for the app: the per-domain directory shape, the Supabase network layer, query keys, stale times, `queryOptions`, hooks, mutations, invalidation, polling, pagination, persistence, and prefetch. Where this gate and the data-fetching notes in `frontend-patterns` / `project-structure` disagree, **this gate wins**.
 
-It assumes the stack in `project-structure` (one Expo app talking to its own Supabase project, RLS as the authorisation layer). The point of the gate is not the example domain — it's the **shape**: every domain that touches the network is laid out identically, so a new domain is a copy-paste-and-rename away.
+It assumes the stack in `project-structure`. The point of the gate is not the example domain — it's the **shape** below.
 
 ---
 
@@ -19,7 +19,7 @@ It assumes the stack in `project-structure` (one Expo app talking to its own Sup
 
 `<domain>` is the plural folder and fetcher name (`workouts`); `<Domain>` is the singular type name (`Workout`). Type and schema files are singular: `types/workout.types.ts`, `schemas/workout.schema.ts`.
 
-**The dividing line, stated once and applied everywhere: is it React / React-Query (hooks, query keys, `queryOptions`, `queryClient.query`) → `hooks/<domain>/`. Is it a Supabase call → `lib/api/<domain>.ts`.** A file with no React and no TanStack import never belongs under `hooks/`, and the Supabase client is never imported above `lib/`.
+**The dividing line: is it React / React-Query (hooks, query keys, `queryOptions`, `queryClient.query`) → `hooks/<domain>/`. Is it a Supabase call → `lib/api/<domain>.ts`.** A file with no React and no TanStack import never belongs under `hooks/`, and the Supabase client is never imported above `lib/`.
 
 Each of these is a **gate failure**: a `supabase.from(...)` call under `hooks/`, in a component or a route file; a domain with reads but no `<domain>.cache.ts` (write-only network files such as `auth.ts`, `account.ts` and `pushTokens.ts` need none); a query key or `staleTime` hand-built inside a hook; a network file named `<domain>Api.ts` instead of `lib/api/<domain>.ts`; an `index.ts` barrel anywhere in the domain folder; a server read done with `useState` + `useEffect` instead of a cached `use*` hook.
 
@@ -47,7 +47,7 @@ The **foundation is written once per app**: `lib/supabase.ts`, `lib/storage.ts`,
 
 ## 1. Server state lives in TanStack Query
 
-- Anything that comes from Supabase is **server state** and lives in the TanStack cache by default. Stop hand-rolling `useState` + `useEffect` + a query for server reads.
+- Anything that comes from Supabase is **server state** and lives in the TanStack cache by default.
 - Client / UI state (form drafts, toggles, selections, filters) stays in component state or Zustand — see `frontend-patterns`. **Never mirror query data into Zustand**: that creates two sources of truth that drift.
 - **RLS scopes every row to the signed-in user.** Fetchers never filter by `user_id` — a client-side filter hides a missing policy.
 
@@ -60,6 +60,7 @@ Create it **once** at the app root and tune defaults for mobile: TanStack's defa
 import { QueryClient } from '@tanstack/react-query'
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
 import Constants from 'expo-constants'
+import * as Updates from 'expo-updates'
 import { kvStorage } from '@/lib/storage'
 import { hours, seconds } from '@/lib/time'
 
@@ -70,7 +71,7 @@ export const queryPersister = createAsyncStoragePersister({ storage: kvStorage }
 export const persistOptions = {
   persister: queryPersister,
   maxAge: CACHE_MAX_AGE,
-  buster: Constants.expoConfig?.version ?? '0',   // a new app version never reads an old cache
+  buster: Updates.updateId ?? Constants.expoConfig?.version ?? '0',   // a new build or EAS Update never reads an old cache
 }
 
 export const createAppQueryClient = () =>
@@ -353,7 +354,7 @@ export const prefetchInitialData = (queryClient: QueryClient) => {
 }
 ```
 
-Warm with `queryClient.query()` / `infiniteQuery()` (TanStack Query 5.102+; `prefetchQuery` is deprecated). They skip data that isn't stale yet and reject on failure, which the registry's `.catch` logs. Trigger it **once**, after a successful sign-in — not from a per-screen effect. Each task is fire-and-forget with its own `.catch` so one domain's failure can't sink the others; prefetch is opportunistic, silent on slow and on failure.
+Warm with `queryClient.query()` / `infiniteQuery()` (TanStack Query 5.102+; `prefetchQuery` is deprecated). They skip data that isn't stale yet and reject on failure, which the registry's `.catch` logs. Trigger it **once**, after a successful sign-in — not from a per-screen effect. Each task is fire-and-forget with its own `.catch` so one domain's failure can't sink the others.
 
 ## 12. The `appConfig` domain — remote config is just another query
 
