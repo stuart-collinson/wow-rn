@@ -14,10 +14,12 @@ It assumes the stack in `project-structure` (one Expo app talking to its own Sup
 | --- | --- | --- |
 | `lib/api/<domain>.ts` | **`lib/api/`** — never under `hooks/` | the network layer: fetcher functions on `supabase-js` |
 | `hooks/<domain>/<domain>.cache.ts` | `hooks/<domain>/` | query keys + stale times + `queryOptions` factories (one per domain, at the domain root) |
-| `hooks/<domain>/use<Domain><Verb>.ts` | `hooks/<domain>/` | every `use*` hook — query, mutation, and domain-specific non-query — one per file |
+| `hooks/<domain>/use*.ts` | `hooks/<domain>/` | every hook — `useWorkouts`, `useWorkout`, `useCreateWorkout` — one per file |
 | `hooks/<domain>/prefetch<Domain>Queries.ts` | `hooks/<domain>/` | warms the domain's queries (e.g. on sign-in) |
 
-**The dividing line, stated once and applied everywhere: is it React / React-Query (hooks, query keys, `queryOptions`, `prefetchQuery`) → `hooks/<domain>/`. Is it a Supabase call → `lib/api/<domain>.ts`.** A file with no React and no TanStack import never belongs under `hooks/`, and the Supabase client is never imported above `lib/`.
+`<domain>` is the plural folder and fetcher name (`workouts`); `<Domain>` is the singular type name (`Workout`). Type and schema files are singular: `types/workout.types.ts`, `schemas/workout.schema.ts`.
+
+**The dividing line, stated once and applied everywhere: is it React / React-Query (hooks, query keys, `queryOptions`, `queryClient.query`) → `hooks/<domain>/`. Is it a Supabase call → `lib/api/<domain>.ts`.** A file with no React and no TanStack import never belongs under `hooks/`, and the Supabase client is never imported above `lib/`.
 
 Each of these is a **gate failure**: a `supabase.from(...)` call under `hooks/`, in a component or a route file; a domain with no `<domain>.cache.ts`; a query key or `staleTime` hand-built inside a hook; a network file named `<domain>Api.ts` instead of `lib/api/<domain>.ts`; an `index.ts` barrel anywhere in the domain folder; a server read done with `useState` + `useEffect` instead of a cached `use*` hook.
 
@@ -36,14 +38,12 @@ src/
     └── <domain>/                 the domain's REACT-QUERY layer
         ├── <domain>.cache.ts     query keys + stale times + queryOptions factories — ALWAYS at the domain root
         ├── prefetch<Domain>Queries.ts   warms the domain's queries — ALWAYS at the domain root
-        └── use<Domain><Verb>.ts  one hook per file (useWorkouts, useWorkout, useCreateWorkout, …)
+        └── use*.ts               one hook per file (useWorkouts, useWorkout, useCreateWorkout, …)
 ```
 
 ## 0a. What's set up ONCE vs. what repeats
 
-Most of this gate is the **per-domain shape that repeats**. A small **foundation is wired a single time** when the app is scaffolded, then left alone: `lib/supabase.ts`, `lib/storage.ts`, `lib/queryClient.ts` (§2), the root `PersistQueryClientProvider` mount plus the `focusManager` / `onlineManager` wiring (§2a–§3), `lib/api/dataError.ts` (§4), `lib/prefetch.ts` (§11) and `lib/time.ts` (§5b).
-
-Everything else — `lib/api/<domain>.ts`, `hooks/<domain>/<domain>.cache.ts`, the `use*` hooks, `prefetch<Domain>Queries.ts` — is **per domain** and is copy-paste-and-rename. If you find yourself editing a foundation file to add a domain, stop: the shape has drifted.
+The **foundation is written once per app**: `lib/supabase.ts`, `lib/storage.ts`, `lib/queryClient.ts`, `lib/api/dataError.ts`, `lib/prefetch.ts`, `lib/time.ts`, and the provider, auth-listener and `focusManager` / `onlineManager` wiring (§2–§3). A new domain is copy-paste-and-rename of the **per-domain files** plus one line in `lib/prefetch.ts`; editing any other foundation file to add a domain means the shape has drifted.
 
 ## 1. Server state lives in TanStack Query
 
@@ -60,7 +60,6 @@ Create it **once** at the app root and tune defaults for mobile: TanStack's defa
 import { QueryClient } from '@tanstack/react-query'
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
 import Constants from 'expo-constants'
-import { DataError } from '@/lib/api/dataError'
 import { kvStorage } from '@/lib/storage'
 import { hours, seconds } from '@/lib/time'
 
@@ -81,16 +80,17 @@ export const createAppQueryClient = () =>
         staleTime: seconds(30),        // modest floor — most screens don't need fresher than this
         gcTime: CACHE_MAX_AGE,         // must be ≥ maxAge or the persisted cache is collected early
         refetchOnWindowFocus: true,    // wired to AppState in §3 for RN
-        retry: (failureCount, error) => !(error instanceof DataError) && failureCount < 2,
+        retry: false,                  // supabase-js already retries reads on a network failure
       },
       mutations: {
         retry: false,                  // user-triggered; never silently retried
+        networkMode: 'always',         // fail fast offline instead of pausing — there is no offline queue
       },
     },
   })
 ```
 
-A `DataError` is PostgREST or RLS telling you the request itself is wrong (a denied row, a missing table, a bad filter); retrying won't fix it. A transport failure, which `supabase-js` hands back as an error with an empty `code`, is thrown as a `NetworkError` and gets two retries.
+`supabase-js` retries a read itself — up to three attempts with backoff on a network failure or a 503 — so TanStack's retries stay off; stacking both turns one dead connection into a dozen requests. Without `networkMode: 'always'`, the `onlineManager` wiring (§3) pauses an offline write with `isPending` stuck on instead of failing it.
 
 ### 2a. The persisted cache — online-first, instant on relaunch
 
@@ -111,14 +111,15 @@ return (
 ```
 
 - Reads are instant from cache, then refetched when stale. **Writes need a connection** — there is no offline mutation queue; a failed mutation surfaces to the user (§8).
-- **One sign-out sequence, in this order** (`hooks/useSignOut.ts`): anything that needs the live session first — `deletePushTokenRequest(token)` when push is on, `Purchases.logOut()` when payments are on — then `queryClient.cancelQueries()`, `queryClient.clear()`, `await queryPersister.removeClient()`, and only then `signOutRequest()`. Clearing before signing out means a kill mid-sequence leaves no cache behind; the `SIGNED_OUT` event then flips the auth gate. Skipping a step shows the next user the previous user's screens or notifications.
+- **The auth listener clears the cache, not a button.** The session provider's `onAuthStateChange` handler runs `queryClient.cancelQueries()`, `queryClient.clear()` and `await queryPersister.removeClient()` on `SIGNED_OUT` and on `INITIAL_SESSION` with no session. Sessions end without anyone tapping sign-out — a revoked refresh token, an app killed mid-sign-out — and the persisted cache would otherwise show the next user the previous user's screens.
+- **Sign-out** (`hooks/useSignOut.ts`) first does what needs the live session — `deletePushTokenRequest(token)` when push is on, `Purchases.logOut()` when payments are on, each in its own `try`/`catch` that logs and carries on — then `signOutRequest()`. A failed step never leaves the user signed in.
 
 ## 3. React Native wiring — `focusManager` + `onlineManager`
 
 Two bits of wiring at the app root, done **once**. Without them, `refetchOnWindowFocus` never fires (there is no browser window) and queries keep firing with no connection.
 
 ```ts
-// root layout, inside a useEffect with cleanup — refetch stale queries when the app returns to the foreground
+// AppShell, inside a useEffect with cleanup — refetch stale queries when the app returns to the foreground
 const subscription = AppState.addEventListener('change', (status) => focusManager.setFocused(status === 'active'))
 return () => subscription.remove()
 
@@ -164,12 +165,12 @@ export const unwrap = <T>({ data, error }: Result<T>): T => {
   return data
 }
 
-export const assertOk = ({ error }: { error: PostgrestError | null }): void => {
+export const assertOk = ({ error }: { error: PostgrestError | null }) => {
   if (error) throw toError(error)
 }
 ```
 
-`unwrap` is for reads and writes that `.select()` a row back; `assertOk` is for writes that return nothing (`delete`, an `update` without `.select()`, an `rpc`). An error with no `code` is the network failing, not PostgREST, so it becomes a `NetworkError` the retry predicate retries.
+`unwrap` is for reads and writes that `.select()` a row back; `assertOk` is for writes that return nothing (`delete`, an `update` without `.select()`, an `rpc`). An error with no `code` is the network failing, not PostgREST, so it becomes a `NetworkError` and a screen can say "You're offline" rather than "Something went wrong".
 
 ### The domain fetchers — `lib/api/<domain>.ts`
 
@@ -192,7 +193,7 @@ export const fetchWorkouts = async (params: WorkoutListParams) => {
     .order('created_at', { ascending: false })
     .order('id', { ascending: false })
     .limit(params.pageSize + 1)
-  if (params.search) query = query.ilike('name', `%${params.search}%`)
+  if (params.search) query = query.ilike('name', `%${params.search.replace(/[\\%_]/g, '\\$&')}%`)
   if (params.cursor) query = query.lt('created_at', params.cursor)
   const rows = unwrap(await query)
   const page = rows.slice(0, params.pageSize)
@@ -206,13 +207,13 @@ export const fetchWorkout = async (id: string): Promise<Workout> =>
 export const createWorkoutRequest = async (input: CreateWorkoutInput): Promise<Workout> =>
   toWorkout(unwrap(await supabase.from('workout').insert({ name: input.name, duration_minutes: input.durationMinutes }).select(WORKOUT_COLUMNS).single()))
 
-export const deleteWorkoutRequest = async (id: string): Promise<void> =>
+export const deleteWorkoutRequest = async (id: string) =>
   assertOk(await supabase.from('workout').delete().eq('id', id))
 ```
 
-- **Naming is a fixed convention.** Reads are `fetch<Domain>` / `fetch<Domain>List`; every write is `<verb><Domain>Request`. No bare imperative names (`getWorkout`, `listWorkouts`).
+- **Naming is a fixed convention.** Reads are `fetch<Domain>` for one row and `fetch<Domain>s` for a list (`fetchWorkout`, `fetchWorkouts`); every write is `<verb><Domain>Request`. No bare imperative names (`getWorkout`, `listWorkouts`).
 - **Explicit columns, always.** `WORKOUT_COLUMNS` (`types/workout.types.ts`) lists every column the mapper reads; never `select('*')`. Related rows come from relational selects (`exercise:exercise_id(id, name)`), never a loop.
-- **Rows are `snake_case`; domain types are `camelCase`.** The mapper (`toWorkout(row: WorkoutRow): Workout`) lives beside the type in `types/<domain>.types.ts`, where `WorkoutRow` is `Database['public']['Tables']['workout']['Row']` from the generated types. Hooks and screens never see a snake_case field.
+- **Rows are `snake_case`; domain types are `camelCase`.** The mapper (`toWorkout(row: WorkoutRow): Workout`) lives beside the type in `types/workout.types.ts`, where `WorkoutRow` is `Database['public']['Tables']['workout']['Row']` from the generated types. Hooks and screens never see a snake_case field.
 - **Inserts never set `user_id`.** The column defaults to `auth.uid()` (see `database-standards`); the row belongs to whoever is signed in, and a client can't claim otherwise.
 - **The seam.** Only `lib/api/` imports `@/lib/supabase`. If an app ever gains a Hono API, a `client.ts` returns here and each fetcher becomes one HTTP call; nothing above this folder changes.
 
@@ -275,7 +276,7 @@ export const workoutDetailQuery = (id: string) =>
 
 ## 6. Caching rules — tune to how fast the data changes
 
-`staleTime` is decided **in the domain's cache file**, alongside the query it governs; `gcTime` stays at the global 24 hours unless a query's data is large and rarely revisited. Slow-moving data (a catalogue, a profile, `app_config`) gets minutes to an hour; live data (a feed during activity, an in-progress process) gets seconds or `0` plus polling (§9) or Realtime (§9a). The global floor (§2) is a backstop, not a target.
+`staleTime` lives in the domain's cache file; `gcTime` stays at the global 24 hours. Slow-moving data (a profile, `app_config`) gets minutes to an hour; live data gets seconds or `0` plus polling (§9) or Realtime (§9a).
 
 ## 7. Hooks — thin React-Query bindings
 
@@ -293,7 +294,7 @@ export const useWorkout = (id: string | undefined) =>
   })
 ```
 
-- **Return the raw query result.** Don't rename `data` to `workout` or unwrap it — screens read `data`, `isLoading`, `error`, `refetch` and handle the three states in priority order (`frontend-patterns` → Loading, Empty, Error).
+- **Return the raw query result.** Don't rename `data` to `workout` or unwrap it — screens read `data`, `isPending`, `error`, `refetch` and handle the three states in priority order (`frontend-patterns` → Loading, Empty, Error).
 - **`enabled` guards on the inputs the query needs.** A query with a missing dependency should not fire.
 - Intra-domain imports use the `@/hooks/<domain>/…` and `@/lib/api/<domain>` aliases, never relative `./`.
 
@@ -320,7 +321,7 @@ A mutation hook owns the write and the cache reconciliation that follows it. Pre
 
 - **`setQueryData` only with an authoritative value** (the mutation returned the updated row): `queryClient.setQueryData(workoutKeys.detail(id), updated)`. Otherwise invalidate.
 - **Invalidate by the narrowest prefix that covers the change.** A new row in a list → `workoutKeys.lists()`, not `workoutKeys.all`.
-- **On error, leave the cache untouched** (unless you ran an optimistic update) and surface the failure to the user. A `DataError` with code `42501` is an RLS denial — a missing policy, never something to retry or hide.
+- **On error, leave the cache untouched** (unless you ran an optimistic update) and surface the failure to the user. A `DataError` with code `42501` is a missing policy or grant — never something to retry or hide.
 - **Optimistic UI is opt-in** for mutations whose result is predictable (toggling a favourite, renaming): in `onMutate` cancel the query, snapshot `getQueryData`, `setQueryData` the expected value and return the snapshot; in `onError` restore it; in `onSettled` invalidate. Never for destructive mutations (delete, archive) or unpredictable server results — show `mutation.isPending` there.
 
 ## 9. Polling with `refetchInterval`
@@ -345,16 +346,16 @@ Warm the cache for the screens the user lands on right after they sign in. Becau
 
 ```ts
 // hooks/workouts/prefetchWorkoutQueries.ts — the screen's own defaults, or you warm a key it never reads
-export const prefetchWorkoutQueries = (queryClient: QueryClient) => queryClient.prefetchInfiniteQuery(workoutListQuery({ pageSize: 20 }))
+export const prefetchWorkoutQueries = (queryClient: QueryClient) => queryClient.infiniteQuery(workoutListQuery({ pageSize: 20 }))
 
 // lib/prefetch.ts — one registry, walked once after sign-in; adding a domain is one line
 const TASKS = [{ domain: 'workouts', run: prefetchWorkoutQueries }, { domain: 'appConfig', run: prefetchAppConfigQueries }]
-export const prefetchInitialData = (queryClient: QueryClient): void => {
+export const prefetchInitialData = (queryClient: QueryClient) => {
   for (const task of TASKS) void task.run(queryClient).catch((error) => console.error(`[prefetch] ${task.domain} failed`, error))
 }
 ```
 
-Trigger it **once**, after a successful sign-in — not from a per-screen effect. Each task is fire-and-forget with its own `.catch` so one domain's failure can't sink the others; prefetch is opportunistic, silent on slow and on failure.
+Warm with `queryClient.query()` / `infiniteQuery()` — `prefetchQuery` is deprecated. They skip data that isn't stale yet and reject on failure, which the registry's `.catch` logs. Trigger it **once**, after a successful sign-in — not from a per-screen effect. Each task is fire-and-forget with its own `.catch` so one domain's failure can't sink the others; prefetch is opportunistic, silent on slow and on failure.
 
 ## 12. The `appConfig` domain — remote config is just another query
 
@@ -385,16 +386,15 @@ Consumers read `config?.ads_enabled === true` — a missing row, a failed fetch,
 
 ## 13. Directory layout, barrels & comments
 
-- **`hooks/<domain>/`** holds the cache file, prefetch, the `use*` hooks and any domain-specific non-query React hooks; cross-cutting hooks (`useDebounce`) stay flat in `hooks/`. Sub-resource sub-folders (`hooks/<domain>/<sub>/`, mirrored as `lib/api/<domain>/<sub>.ts`) when a domain spans several; the domain-root files always stay at the root.
-- **No barrel / `index.ts` aggregator — anywhere.** Consumers import each hook directly.
-- **Comments:** `use*` hooks, prefetch files and fetchers default to **zero comments** — they are plumbing. `<domain>.cache.ts` is the one place a comment is sanctioned, and only for non-obvious cache reasoning. No `as any` to read an error field — narrow with `error instanceof DataError`.
+- **Sub-resources:** a domain spanning several gets `hooks/<domain>/<sub>/`, mirrored as `lib/api/<domain>/<sub>.ts`; the domain-root files stay at the root. Cross-cutting hooks (`useDebounce`) stay flat in `hooks/`. No `index.ts` barrel anywhere.
+- **Comments:** hooks, prefetch files and fetchers have none; `<domain>.cache.ts` may carry one for non-obvious cache reasoning. Narrow errors with `error instanceof DataError`, never `as any`.
 
 ---
 
 ## Adopt on a new domain — checklist
 
-1. `types/<domain>.types.ts`: `<Domain>Row`, `<DOMAIN>_COLUMNS`, the `camelCase` type, `to<Domain>(row)`.
-2. `lib/api/<domain>.ts`: one query per operation, explicit columns, `unwrap`/`assertOk`, the mapper; `fetch<Domain>[List]` reads, `<verb><Domain>Request` writes; no `user_id` filters, no `try`/`catch`, no comments.
+1. The singular type file (`types/workout.types.ts`): `<Domain>Row`, `<DOMAIN>_COLUMNS`, the `camelCase` type, `to<Domain>(row)`.
+2. `lib/api/<domain>.ts`: one query per operation, explicit columns, `unwrap`/`assertOk`, the mapper; `fetch<Domain>` / `fetch<Domain>s` reads, `<verb><Domain>Request` writes; no `user_id` filters, no `try`/`catch`, no comments.
 3. `hooks/<domain>/<domain>.cache.ts`: key factory, `STALE_TIMES`, a `queryOptions`/`infiniteQueryOptions` factory per read.
-4. `hooks/<domain>/use<Domain><Verb>.ts`: one export per file, spreading the factory, `enabled` guards.
+4. `hooks/<domain>/use*.ts`: one export per file, spreading the factory, `enabled` guards.
 5. Mutations invalidate the narrowest prefix (or `setQueryData` with an authoritative value); keyset pagination + `useInfiniteQuery`; `prefetch<Domain>Queries.ts` + one line in `lib/prefetch.ts`; no barrel; polling and Realtime only when the data needs them.

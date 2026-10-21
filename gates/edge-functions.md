@@ -27,7 +27,7 @@ supabase/functions/
     └── index.ts
 ```
 
-Folders are kebab-case. Each function is one handler. In `supabase/config.toml` every function declares `verify_jwt = false` — the platform's built-in check only understands the legacy keys — and verifies its caller itself (below).
+Folders are kebab-case. Each function is one handler. In `supabase/config.toml` a function only signed-in users call keeps `verify_jwt = true` (the platform check accepts the new signing keys); a webhook or a secret-key job sets `verify_jwt = false`. Every function still verifies its caller itself (below).
 
 ## The portability rule
 
@@ -37,7 +37,7 @@ Folders are kebab-case. Each function is one handler. In `supabase/config.toml` 
 
 ```ts
 // _shared/runtime.ts — the only file that knows the runtime
-export const serve = (handler: (request: Request) => Promise<Response>): void => Deno.serve(handler)
+export const serve = (handler: (request: Request) => Promise<Response>) => Deno.serve(handler)
 
 export const getEnv = (name: string): string => {
   const value = Deno.env.get(name)
@@ -113,7 +113,7 @@ serve(async (request) => {
 
 ## The push sender
 
-`send-push` reads `device_push_token` with the admin client for the users it is told to reach, sends through `npm:expo-server-sdk` in `chunkPushNotifications` batches, and deletes tokens whose receipt says `DeviceNotRegistered`. It is called by `pg_net` from a trigger or `pg_cron` with the secret key as `apikey` (verified with `auth: 'secret'`), or by an authenticated admin — never by `anon`.
+`send-push` reads `device_push_token` with the admin client for the users it is told to reach, sends through `npm:expo-server-sdk` in `chunkPushNotifications` batches, and deletes tokens whose receipt says `DeviceNotRegistered`. It is called by `pg_net` from a trigger or `pg_cron` with the secret key as `apikey` (verified with `auth: 'secret'`) — never by a user, signed in or not, or anyone could push to anyone.
 
 ## Local run, deploy, logs
 

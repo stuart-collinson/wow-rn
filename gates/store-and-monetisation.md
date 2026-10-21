@@ -4,7 +4,7 @@ What it takes to be on both stores and make money at no monthly cost. Payments, 
 
 ## Payments — RevenueCat *(when enabled)*
 
-- **Configure once at app start** in `lib/purchases.ts`: `configurePurchases()` calls `Purchases.configure({ apiKey })` with the platform's public SDK key from `env` (`EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`). After sign-in, `Purchases.logIn(session.user.id)` so entitlements follow the Supabase user across devices; `Purchases.logOut()` runs in the sign-out sequence (`tanstack-query` §2a).
+- **Configure once at app start** in `lib/purchases.ts`: `configurePurchases()` calls `Purchases.configure({ apiKey })` with the platform's public SDK key from `env` (`EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `EXPO_PUBLIC_REVENUECAT_ANDROID_KEY`). After sign-in, `Purchases.logIn(session.user.id)` so entitlements follow the Supabase user across devices; `Purchases.logOut()` runs in sign-out (`tanstack-query` §2a).
 - **`useEntitlements()`** (`hooks/useEntitlements.ts`) is the only place the app reads purchase state: `getCustomerInfo()` on mount plus `addCustomerInfoUpdateListener`, returning `{ isPro, isLoading }` where `isPro = Boolean(customerInfo.entitlements.active['pro'])`. The RevenueCat SDK is the cache — this is not a TanStack query, and `isPro` is never mirrored into Zustand.
 - **The paywall is RevenueCat's.** Gate an action with `RevenueCatUI.presentPaywallIfNeeded({ requiredEntitlementIdentifier: 'pro' })`; the paywall itself is designed in the RevenueCat dashboard and changes without a release.
 - **Restore purchases is always visible** — on the paywall and in settings — calling `Purchases.restorePurchases()`. Apple rejects apps without it.
@@ -23,7 +23,7 @@ What it takes to be on both stores and make money at no monthly cost. Payments, 
 
 - **`registerForPush()`** (`lib/notifications.ts`) asks permission at a meaningful moment — right after the user does the thing notifications are about — never on first launch. On grant it calls `Notifications.getExpoPushTokenAsync({ projectId })`, registers it through `registerPushTokenRequest({ token, platform })` in `lib/api/pushTokens.ts` (the `register_push_token` RPC, which moves the token to whoever is signed in — a token identifies the device, not the user), and keeps the token in `kvStorage` so sign-out can call `deletePushTokenRequest(token)` first (`tanstack-query` §2a). Nothing else in the app touches that table.
 - `Notifications.setNotificationHandler` is set once, in the root layout, so foreground notifications show.
-- **Credentials are free:** an APNs key for iOS and FCM v1 credentials from a Firebase project for Android, both uploaded with `eas credentials`. Sending goes through the `send-push` Edge Function (`edge-functions`), which prunes `DeviceNotRegistered` tokens.
+- **Credentials are free:** an APNs key for iOS and FCM v1 credentials from a Firebase project for Android, both uploaded with `eas credentials`; Android also needs that project's `google-services.json` as `android.googleServicesFile`. Sending goes through the `send-push` Edge Function (`edge-functions`), which prunes `DeviceNotRegistered` tokens.
 
 ## Store review prompt
 
@@ -32,7 +32,7 @@ What it takes to be on both stores and make money at no monthly cost. Payments, 
 
 ## Account deletion
 
-Required by both stores. Settings → "Delete account" → a confirm dialog → `deleteMyAccountRequest()` (`lib/api/account.ts`, `supabase.rpc('delete_my_account')`) → the sign-out path (`tanstack-query` §2a) → the auth gate flips. Tell the user that an active subscription is cancelled in the App Store or Play Store settings, with a link, because no app can cancel it for them. An app with uploads extends `delete_my_account()` to remove its Storage objects first (`database-standards`). The `delete-account.md` page in `app-sites` explains the same path for Google Play's deletion-request URL.
+Required by both stores. Settings → "Delete account" → a confirm dialog → `deleteMyAccountRequest()` (`lib/api/account.ts`, `supabase.rpc('delete_my_account')`) → the sign-out path (`tanstack-query` §2a) → the auth gate flips. Tell the user that an active subscription is cancelled in the App Store or Play Store settings, with a link, because no app can cancel it for them. An app with uploads first lists the user's `<user id>/` folder and removes it with `supabase.storage.from(bucket).remove(paths)` (`deleteMyFilesRequest()` in the same file); Supabase rejects a SQL delete from `storage.objects`. The `delete-account.md` page in `app-sites` explains the same path for Google Play's deletion-request URL.
 
 ## Store pages
 
@@ -40,11 +40,11 @@ Each app has three Markdown pages in the public `app-sites` repo (`project-struc
 
 ## Required app config
 
-`app.json` for every app: `version` (semver, bumped per store release), `scheme`, `ios.bundleIdentifier` and `android.package`, `ios.supportsTablet: true`, `ios.usesAppleSignIn: true`, `userInterfaceStyle: "automatic"`, `experiments.typedRoutes: true`, `runtimeVersion: { "policy": "fingerprint" }` with `updates.url` written by `eas update:configure`, and plugins for `expo-router`, `expo-sqlite`, `expo-apple-authentication`, `@react-native-google-signin/google-signin` (with `iosUrlScheme`), plus `expo-notifications`, `react-native-google-mobile-ads` and `expo-tracking-transparency` when those modules are on. Expo generates the iOS privacy manifest from plugins; a library that asks for a "required reason" entry gets it under `ios.privacyManifests`.
+`app.json` for every app: `version` (semver, bumped per store release), `scheme`, `ios.bundleIdentifier` and `android.package`, `ios.supportsTablet: true`, `ios.usesAppleSignIn: true`, `ios.appStoreUrl` and `android.playStoreUrl` once the listings exist (`StoreReview.storeUrl()` returns `null` without them), `userInterfaceStyle: "automatic"`, `experiments.typedRoutes: true`, `experiments.reactCompiler: true`, `runtimeVersion: { "policy": "fingerprint" }` with `updates.url` written by `eas update:configure`, and plugins for `expo-router`, `expo-sqlite`, `expo-apple-authentication`, `@react-native-google-signin/google-signin` (with `iosUrlScheme`), plus `expo-notifications` (with `android.googleServicesFile`), `react-native-google-mobile-ads` and `expo-tracking-transparency` when those modules are on. Expo generates the iOS privacy manifest from plugins; a library that asks for a "required reason" entry gets it under `ios.privacyManifests`.
 
 ## Minimum supported version
 
-The root layout renders `UpdateRequired` (`components/UpdateRequired/UpdateRequired.tsx`) instead of the app when `Constants.expoConfig.version` is lower by semver than `app_config.min_supported_version`: a short message and a button to `StoreReview.storeUrl()`, no way past. Raise the value in the dashboard to retire a release that must not run; it is the only reliable way to stop a broken build when store releases are the update path.
+`AppShell` renders `UpdateRequired` (`components/UpdateRequired/UpdateRequired.tsx`) instead of the app when `Constants.expoConfig.version` is lower by semver than `app_config.min_supported_version`: a short message and a button to `StoreReview.storeUrl()`, no way past. Raise the value in the dashboard to retire a release that must not run; it is the only reliable way to stop a broken build when store releases are the update path.
 
 ## Release
 
@@ -54,4 +54,4 @@ The root layout renders `UpdateRequired` (`components/UpdateRequired/UpdateRequi
 
 ## EAS Update policy
 
-`expo-updates` stays installed with `runtimeVersion: { "policy": "fingerprint" }` and a channel per profile. It is for **JS-only hotfixes** (`eas update --channel production --message "…"`), never for a change that touches native code or a config plugin — those are store releases. The free plan serves updates to 1,000 monthly users; beyond that EAS stops serving them and the app keeps running its embedded bundle. That is accepted: store releases are the real update path.
+`expo-updates` stays installed with `runtimeVersion: { "policy": "fingerprint" }` and a channel per profile. It is for **JS-only hotfixes** (`eas update --channel production --environment production --message "…"`), never for a change that touches native code or a config plugin — those are store releases. The free plan serves updates to 1,000 monthly users; beyond that EAS stops serving them and the app keeps running its embedded bundle. That is accepted: store releases are the real update path.

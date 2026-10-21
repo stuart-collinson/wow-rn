@@ -15,10 +15,12 @@ Every component file defines exactly one component. Sub-components get their own
 ```tsx
 // PASS — WorkoutList/WorkoutList.tsx owns logic, composes children
 const WorkoutList = () => {
-  const { data: workouts, isLoading, error, refetch } = useWorkouts()
+  const { data, isPending, error, refetch } = useWorkouts()
 
-  if (isLoading) return <WorkoutListSkeleton />
+  if (isPending) return <WorkoutListSkeleton />
   if (error) return <ErrorState message="Couldn't load workouts" onRetry={refetch} />
+
+  const workouts = data.pages.flatMap((page) => page.data)
   if (workouts.length === 0) return <EmptyState message="No workouts yet" />
 
   return (
@@ -58,7 +60,7 @@ const StatCard = ({ label, value }: Props) => (
 ```
 
 - **Design tokens are Tailwind theme values**, not magic numbers. Colours and radii are the `--color-*` and `--radius` variables in `global.css` (the shadcn set Reusables expects: `background`, `foreground`, `card`, `primary`, `muted`, `border`, `destructive`, …); reference the semantic class (`bg-card`, `text-muted-foreground`) so re-theming an app is one CSS edit. Never a raw hex value in a component.
-- **Dark mode is automatic.** The `@variant light` / `@variant dark` blocks in `global.css` swap the variables, so a component never writes `dark:` for a themed colour. Set `userInterfaceStyle: "automatic"` in `app.json` so the app follows the system; override with `Uniwind.setTheme('dark' | 'light' | 'system')` when the user chooses.
+- **Dark mode is automatic.** The `@variant light` / `@variant dark` blocks in `global.css` swap the variables, so a component never writes `dark:` for a themed colour. Set `userInterfaceStyle: "automatic"` in `app.json` so the app follows the system (Android also needs `expo-system-ui` installed); override with `Uniwind.setTheme('dark' | 'light' | 'system')` when the user chooses.
 - **Screens respect the safe area.** Native stack headers and native tabs already inset their content; a header-less screen wraps its content in `SafeAreaView` from `react-native-safe-area-context`.
 
 ### Expo UI versus Tailwind
@@ -117,6 +119,8 @@ const TabsLayout = () => (
 export default TabsLayout
 ```
 
+Native tabs have no header and no stack of their own. A tab that pushes screens (a list opening a detail) is a folder with its own `_layout.tsx` rendering a `Stack`; without it the tab can't push screens or show a header.
+
 ### Auth gate — `Stack.Protected` in `AppShell`
 
 The signed-in/signed-out split is enforced declaratively with `Stack.Protected` guards, not with scattered redirects in each screen. They live in `components/AppShell/AppShell.tsx`, which the root `_layout.tsx` renders inside the providers, because the guards read hooks that need those providers.
@@ -129,7 +133,7 @@ import { useSession } from '@/hooks/useSession'
 const AppShell = () => {
   const { isAuthenticated, isLoading } = useSession()
 
-  if (isLoading) return <SplashScreen />
+  if (isLoading) return null   // the native splash screen stays up
 
   return (
     <Stack screenOptions={{ headerShown: false }}>
@@ -180,7 +184,7 @@ Reach for `useReducer` when a component has **3+ related state values that trans
 
 ## Forms — React Hook Form + Zod
 
-RHF is the single source of truth for form state. Never use Zustand or `useState` for form fields. Zod handles validation via `zodResolver`; the schema lives in `src/schemas/<domain>.schema.ts` and its inferred type is the form's type. Because RN inputs are controlled differently from web, use `Controller` to bind Reusables inputs.
+RHF is the single source of truth for form state. Never use Zustand or `useState` for form fields. Zod handles validation via `zodResolver`; the schema lives in `src/schemas/` (`workout.schema.ts`) and its inferred type is the form's type. Because RN inputs are controlled differently from web, use `Controller` to bind Reusables inputs.
 
 ```tsx
 import { useForm, Controller } from 'react-hook-form'
@@ -221,7 +225,7 @@ Multi-step wizards use a **single RHF instance at the parent**, shared via `Form
 
 ## Loading, Empty, and Error States
 
-Every screen that loads data handles **loading, empty, error** explicitly, in that priority order off the query object (`isLoading`, `error`, empty `data` — see `WorkoutList` above). Skeletons sit next to the component they shadow, match its shape, and are built from the Reusables `Skeleton`. Mutations do the same: pending off `mutation.isPending` (submit disabled), success (toast / navigate), error (inline or toast). Optimistic updates are opt-in and owned by `tanstack-query` §8.
+Every screen that loads data handles **loading, empty, error** explicitly, in that priority order off the query object (`isPending`, `error`, empty `data` — see `WorkoutList` above). Skeletons sit next to the component they shadow, match its shape, and are built from the Reusables `Skeleton`. Mutations do the same: pending off `mutation.isPending` (submit disabled), success (toast / navigate), error (inline or toast). Optimistic updates are opt-in and owned by `tanstack-query` §8.
 
 ## Lists — `FlatList`, not `.map`
 
@@ -229,7 +233,7 @@ Long or unbounded lists use `FlatList`, or `@shopify/flash-list` v2 for very lon
 
 ## Performance
 
-Optimise when you measure a problem. The React Compiler is on, so don't hand-write memoisation — no memo hooks or memo wrappers unless a profiler shows the compiler missed something, and then say why in a comment. Use `expo-image` (not RN `Image`) for caching and better memory behaviour. Defer heavy work off the JS thread where the API allows (Reanimated 4 worklets for animation).
+Optimise when you measure a problem. The React Compiler is on (`experiments.reactCompiler` in `app.json`), so don't hand-write memoisation — no memo hooks or memo wrappers unless a profiler shows the compiler missed something, and then say why in a comment. Use `expo-image` (not RN `Image`) for caching and better memory behaviour. Defer heavy work off the JS thread where the API allows (Reanimated 4 worklets for animation).
 
 ## Adaptive Layouts — iPad
 
@@ -251,7 +255,7 @@ Every app ships with `ios.supportsTablet: true`, so every screen must earn its w
 
 ## Environment Variables
 
-Expo exposes only variables prefixed `EXPO_PUBLIC_` to the app bundle. Everything `EXPO_PUBLIC_*` ships to the device and is readable by anyone with the app — **it is not a secret**. Centralise access in one validated module; components never read `process.env` directly.
+Expo exposes only `EXPO_PUBLIC_*` variables to the bundle, and every one of them is public (`security-standards`). Centralise access in one validated module; components never read `process.env` directly.
 
 ```typescript
 // lib/env.ts — the single place that reads process.env, validated with Zod
@@ -268,4 +272,4 @@ export const env = envSchema.parse({
 })
 ```
 
-A missing or malformed var then fails fast at startup. Never put a secret (the Supabase secret key, a webhook secret, a third-party server key) in an `EXPO_PUBLIC_*` var — those live only in Edge Function secrets (see `edge-functions` and `security-standards`).
+A missing or malformed var then fails fast at startup.

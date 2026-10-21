@@ -257,7 +257,7 @@ type CreateWorkoutInput = z.infer<typeof createWorkoutSchema>
 
 // Non-throwing flow for user input
 const result = createWorkoutSchema.safeParse(input)
-if (!result.success) return showErrors(result.error.flatten())
+if (!result.success) return showErrors(z.flattenError(result.error))
 await createWorkout(result.data)
 ```
 

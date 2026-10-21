@@ -1,6 +1,6 @@
 # Project Structure
 
-The shape of a React Native project: **one git repo per app**, holding an Expo app, that app's Supabase project, and nothing else. No workspace, no monorepo, no API server. `pnpm` is the package manager — never `npm`, `yarn` or `bun`. Every install is `pnpm add`, every script is `pnpm <script>`.
+The shape of a React Native project: **one git repo per app**, holding an Expo app, that app's Supabase project, and nothing else. No workspace, no monorepo, no API server. `pnpm` is the package manager — never `npm`, `yarn` or `bun`. Expo SDK packages install with `pnpm expo install <pkg>`, which picks the version the SDK supports; everything else is `pnpm add`. Every script is `pnpm <script>`, every one-off CLI `pnpm dlx`.
 
 Shared code does not travel between apps as a package; every app is scaffolded to the same skeleton, and these gates keep every app the same shape.
 
@@ -17,6 +17,7 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 │   │   ├── _layout.tsx         # NativeTabs
 │   │   ├── index.tsx           # Home tab
 │   │   └── workouts/
+│   │       ├── _layout.tsx     # Stack — a tab that pushes screens needs its own
 │   │       ├── index.tsx       # /workouts list
 │   │       └── [id].tsx        # /workouts/:id
 │   └── +not-found.tsx
@@ -35,11 +36,11 @@ Shared code does not travel between apps as a package; every app is scaffolded t
 │   │   ├── time.ts             # seconds() / minutes() / hours()
 │   │   ├── version.ts          # isVersionBelow() for min_supported_version
 │   │   └── api/                # Network layer: dataError.ts + one fetcher file per domain
-│   ├── schemas/                # Zod schemas: <domain>.schema.ts
+│   ├── schemas/                # Zod schemas, singular: workout.schema.ts
 │   ├── stores/                 # Zustand stores: use<Name>Store.ts
 │   ├── providers/              # React Context providers (cross-cutting client state)
 │   ├── constants/              # Cross-file constants: ads.ts, breakpoints.ts
-│   └── types/                  # database.types.ts (generated) + <domain>.types.ts
+│   └── types/                  # database.types.ts (generated) + singular domain types: workout.types.ts
 ├── supabase/                   # Supabase CLI project — see database-standards and edge-functions
 │   ├── config.toml
 │   ├── migrations/             # YYYYMMDDhhmmss_<description>.sql — the schema, in code
@@ -69,7 +70,7 @@ Every component in `src/components/` lives in a folder named after it, the file 
 
 - **Standalone** — `components/AdBanner/AdBanner.tsx`.
 - **Domain group** (2+ peers sharing a prefix) — `components/Workout/WorkoutRow.tsx`, `components/Workout/WorkoutStatsBanner.tsx`. Keep the domain prefix on the filename so imports stay self-describing.
-- **Compound family** (one component with internal sub-components) — `components/Calendar/Calendar.tsx` (parent) + `components/Calendar/CalendarDay.tsx` (child, prefix stripped). Driven by composition, not domain count.
+- **Compound family** (one component with internal sub-components) — `components/Calendar/Calendar.tsx` (parent) + `components/Calendar/CalendarDay.tsx` (child, keeps the prefix). Driven by composition, not domain count.
 
 **A screen's own components** are a domain group named after the screen. The route file renders the sections; a section's children sit beside it as peers with the same prefix, because folders under `components/` never nest. A component a second screen needs moves up to its own folder or its domain's group.
 
@@ -82,13 +83,13 @@ components/Home/HomeRecentWorkouts.tsx
 components/Workout/WorkoutRow.tsx        # the Workouts tab uses it too, so not under Home/
 ```
 
-One exception: **`components/ui/`** holds React Native Reusables' copy-in primitives flat in kebab-case (`button.tsx`, `text.tsx`, `input.tsx`). That layout is owned by the Reusables CLI (`npx react-native-reusables@latest add <component>`); the files are yours to edit, but don't reformat the folder or put bespoke components there.
+One exception: **`components/ui/`** holds React Native Reusables' copy-in primitives flat in kebab-case (`button.tsx`, `text.tsx`, `input.tsx`). That layout is owned by the Reusables CLI (`pnpm dlx @react-native-reusables/cli@latest add <component>`, which adds the Uniwind versions only when `uniwind-types.d.ts` is at the repo root); the files are yours to edit, but don't reformat the folder or put bespoke components there.
 
 ## File Naming
 
 ```
 app/(tabs)/workouts/[id].tsx              # routes — lower-case, Expo Router conventions
-components/WorkoutCard/WorkoutCard.tsx    # PascalCase folder + file for components
+components/AdBanner/AdBanner.tsx          # PascalCase folder + file for components
 components/ui/button.tsx                  # Reusables primitives — kebab-case, CLI-owned
 hooks/useSession.ts                       # camelCase, 'use' prefix — cross-cutting hooks, flat
 hooks/workouts/workouts.cache.ts          # per-domain query keys + queryOptions (see tanstack-query)
@@ -102,7 +103,7 @@ supabase/functions/revenuecat-webhook/index.ts   # Edge Functions — kebab-case
 
 ## `supabase/` lives at the repo root
 
-The Supabase CLI operates on the `supabase/` directory in the current working directory, so it lives at the **repo root** — that's what makes `supabase start` / `supabase db reset` / `supabase db push` work without any `--workdir` juggling. Each app has **one hosted Supabase project** (free plan) and runs the **local stack via Docker** for development; there is no hosted staging project. Run all `supabase` commands from the repo root, and wrap the common ones as `package.json` scripts. Every app has the same script names: `dev`, `typecheck`, `lint`, `test`, `db:start`, `db:reset`, `db:push`, `db:types`, `build:ios`, `build:android`, `submit:ios`, `submit:android`. The migration workflow lives in `database-standards`; the functions layout in `edge-functions`; the release path in `store-and-monetisation`.
+The Supabase CLI works on the `supabase/` directory in the current working directory, so it lives at the **repo root** and every `supabase` command runs from there, wrapped as `package.json` scripts. Every app has the same script names: `dev`, `typecheck`, `lint`, `test`, `db:start`, `db:reset`, `db:check`, `db:push`, `db:types`, `build:ios`, `build:android`, `submit:ios`, `submit:android`. The migration workflow lives in `database-standards`; the functions layout in `edge-functions`; the release path in `store-and-monetisation`.
 
 ## The `app-sites` repo
 

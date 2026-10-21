@@ -19,7 +19,7 @@ The `security-standards` gate is loaded into the session through the `GATES.md` 
 ```bash
 pnpm audit --audit-level=high
 ```
-Grep for hardcoded secrets, `EXPO_PUBLIC_` misuse, and the legacy key names (`anon`, `service_role`). Review high-risk areas: auth, session storage, fetchers, Edge Functions, migrations and policies, deep-link handlers, ads initialisation.
+Grep for hardcoded secrets, `EXPO_PUBLIC_` misuse, and legacy API keys (`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `eyJ…` key values). The `anon` and `authenticated` Postgres roles in migrations are current, not legacy. Review high-risk areas: auth, session storage, fetchers, Edge Functions, migrations and policies, deep-link handlers, ads initialisation.
 
 ### 2. Mobile-specific checks
 - **Secrets in the bundle** — the Supabase secret key, a webhook secret, or any third-party server key reachable from the app (especially in `EXPO_PUBLIC_*`). The app holds only the publishable key, RevenueCat's public SDK keys and AdMob IDs.

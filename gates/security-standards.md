@@ -31,7 +31,7 @@ export const supabase = createClient<Database>(env.EXPO_PUBLIC_SUPABASE_URL, env
 ```
 
 - **The default is the app sandbox**, which iOS and Android encrypt at rest per app — what Expo's own Supabase integration scaffolds. `startAutoRefresh()` / `stopAutoRefresh()` follow `AppState` so tokens refresh in the foreground.
-- **Escalation rule:** an app handling health, finance, or similarly sensitive data stores the session with Supabase's documented `LargeSecureStore` pattern (an AES key in `expo-secure-store`, the encrypted session blob in `kvStorage`). Copy that pattern verbatim; Supabase warns that "optimising" it introduces subtle vulnerabilities.
+- **Escalation rule:** an app handling health, finance, or similarly sensitive data stores the session with Supabase's documented `LargeSecureStore` pattern (an AES key in `expo-secure-store`, the encrypted session in AsyncStorage). Copy that pattern verbatim from Supabase's Expo guide; Supabase warns that "optimising" it introduces subtle vulnerabilities.
 - `kvStorage` (`expo-sqlite/kv-store`) holds non-sensitive state: the query cache, settings, review-prompt counters. Anything secret a user types in (a key to a service they own) goes in `expo-secure-store`.
 - No token ever lands in a Zustand store, a log line, or a component prop.
 
@@ -55,7 +55,7 @@ Authorisation lives in the database, never in the app. The client deciding "this
 
 - **RLS enabled on every table** with per-action policies (see `database-standards`). It's the enforcement that survives a tampered client, and with no API in front of Postgres it is the only one.
 - **The Supabase client is imported only in `lib/`** (`tanstack-query` → the seam). A `supabase.from()` in a component is a review failure because it is where ad-hoc, unreviewed access starts.
-- **Edge Functions verify their caller** with `verifyAuth` and read identity from the verified token, never from the body. The admin client appears only in jobs with no end-user caller, with a comment saying why.
+- **Edge Functions verify their caller** and take identity from the verified token (`edge-functions`).
 - **Privileged operations** (account deletion, anything touching `auth.users`) are `SECURITY DEFINER` functions that act on `auth.uid()` and nothing else.
 
 ## Injection
@@ -75,16 +75,12 @@ Never compose SQL as a string. Genuine raw-SQL needs go in a Postgres function w
 - **Consent before any ad request.** `initialiseAds()` (`store-and-monetisation`) runs the consent form first, asks App Tracking Transparency only when consent allows it, and initialises the SDK last. No `BannerAd` renders before it resolves.
 - **No analytics or crash SDK ships by default.** Adding one later is a privacy-manifest and App Store privacy-label change, not a drop-in.
 
-## Webhooks
-
-An inbound webhook authenticates the sender against a shared secret on every request, validates the payload with Zod, and is idempotent on the sender's event id (`edge-functions`). An obscure URL is not authentication.
-
 ## Transport & platform
 
 - **HTTPS only.** No cleartext traffic — keep `usesCleartextTraffic` off (Android) and ATS on (iOS).
 - Set `autoCapitalize="none"` and `secureTextEntry` on credential-like inputs; disable screenshots on sensitive screens where the platform allows.
 - Keep the Expo SDK and native dependencies current; run `pnpm audit` and address high-severity advisories. Don't ship `expo-dev-client` or debug-only tooling in production builds.
-- **Supabase Storage buckets are private** with signed URLs of 15 minutes or less. Upload limits (file size, MIME allow-list) live in the bucket's policies; filenames are generated (`crypto.randomUUID()`), never the user's.
+- **Supabase Storage buckets are private** with signed URLs of 15 minutes or less. Each user's files live under a `<user id>/` folder, with `storage.objects` policies on `(storage.foldername(name))[1] = (SELECT auth.uid())::text`. File size and MIME allow-list are bucket settings; filenames are generated (`crypto.randomUUID()`), never the user's.
 
 ## Sensitive data exposure
 
@@ -108,7 +104,7 @@ console.log('[auth][signed-in]', { userId })
 | Table with user data, RLS disabled or no policies | CRITICAL | Enable RLS, write per-action policies |
 | String-concatenated SQL | CRITICAL | Typed builder / RPC with parameters |
 | Webhook handler without a secret check | CRITICAL | Compare the shared secret on every request |
-| Legacy key names (`anon`, `service_role`) in a new repo | HIGH | Publishable and secret keys |
+| Legacy API keys (`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, an `eyJ…` key) in a new repo | HIGH | Publishable and secret keys; the `anon` Postgres role is current |
 | Supabase client imported outside `lib/` | HIGH | Move the call into a fetcher |
 | Unvalidated deep-link param used in a query/navigation | HIGH | Zod-validate before use |
 | Ad request before the consent form resolves | HIGH | Gate on `initialiseAds()` |

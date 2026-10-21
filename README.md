@@ -16,7 +16,7 @@ If you stumbled on this, feel free to poke around, but the opinions in here are 
 | Google Play Console | $25 once | Always. A new personal account runs a closed test with 12 testers for 14 days before its first production release. |
 | GitHub | Free | Always. Private app repos, CI, and the public `app-sites` repo for store pages. |
 | Expo | Free | Always. `eas submit`, credentials, EAS Update, the Supabase integration command. |
-| Supabase | Free for two apps | Always. One project per app. App three means Pro ($25/month plus $10/month per extra project) or a second account or organisation. |
+| Supabase | Free for two apps | Always. One project per app. App three means Pro ($25/month plus $10/month per extra project). Free projects pause after a week without activity; restore them from the dashboard. |
 | Google Cloud project | Free | Always. OAuth client IDs for Google sign-in: web, iOS, and an Android client carrying the keystore SHA-1 from `eas credentials`. Under your existing Google account. |
 | RevenueCat | Free to $2.5K/month revenue, then 1% | Only when an app sells something. Apple's paid-apps agreement and bank details too. |
 | Google AdMob | Free | Only when an app shows ads. |
@@ -56,11 +56,13 @@ The `rn-ways-of-working` gates load in full through this import. They are rules,
 @~/.claude/plugins/marketplaces/rn-ways-of-working/gates/GATES.md
 ```
 
-Start `claude` in the repo and accept the two prompts (install the plugin, approve the external import), then start a new session. The hook's startup line should say the gates are loaded in full; if it says `WARNING`, it tells you what to fix.
+Then, once per repo:
 
-### 4. Scaffold the app
+1. Start `claude` in the repo and accept the prompt to install `rn-ways-of-working`. If no prompt appears, run `claude plugin install rn-ways-of-working@rn-ways-of-working --scope project`.
+2. Answer **Yes** to "Allow external CLAUDE.md file imports?". The highlighted default is **No**, and a No is remembered: the gates never load in that repo and Claude Code never asks again. To undo a No, quit Claude Code, set `"hasClaudeMdExternalIncludesApproved": true` for the repo under `projects` in `~/.claude.json`, and start again.
+3. Start a new session and send any message. If the gates didn't load, the plugin says so and why; silence means they did.
 
-The scaffolding recipe is a local skill, `/new-app`, kept in the first app repo ([Pursey](https://github.com/stuart-collinson/Pursey), `.claude/skills/new-app/`) rather than in this plugin, so it never adds to a session's context. Copy that folder into the new repo's `.claude/skills/` and run `/new-app`. It asks for the app name, hosted or local-only Supabase, and which modules you want (payments, ads, push), then scaffolds the skeleton as the first commit and writes a first-real-app checklist into the app's README.
+Headless runs (`claude -p`, CI) never show the prompt, so answer it interactively first.
 
 ## What's in it
 
@@ -69,7 +71,7 @@ The scaffolding recipe is a local skill, `/new-app`, kept in the first app repo 
 | `gates/` | The standards — eight markdown files, loaded in full into every session of a repo that uses this plugin. |
 | `skills/` | `/commit`, `/implement-code`, `/review-code`. |
 | `agents/` | `security-reviewer`, for heavier audits. |
-| `hooks/` + `scripts/` | A `SessionStart` check that confirms the gates are loaded and warns loudly when they are not. |
+| `hooks/` + `scripts/` | A `SessionStart` check that the import line is in place, and a first-prompt check that Claude Code really loaded the gates. Each warns when something is wrong. |
 
 ### The gates
 
@@ -93,10 +95,10 @@ Things only a human with live accounts can finish, once per app: Google and Appl
 ## Updating the gates
 
 1. Edit the gate file in `gates/`. Keep the total near 100,000 characters (`wc -c gates/*.md`).
-2. Bump `version` in `.claude-plugin/plugin.json` — patch for tweaks, minor for new content, major for anything consumers must act on.
-3. Commit and push. Consuming repos pick the new version up on their next session via `autoUpdate`.
+2. Bump `version` in `.claude-plugin/plugin.json` — patch for tweaks, minor for new content, major for anything consumers must act on. Gate text updates without a bump, but skills, hooks and the agent only update when the version changes; skip it and they fall behind the gates.
+3. Commit and push. Auto-update runs in the background of an interactive session, so the change arrives one session later. To take it now: `claude plugin marketplace update rn-ways-of-working && claude plugin update rn-ways-of-working@rn-ways-of-working`, then start a new session.
 
-Adding a gate: create the file under `gates/`, add an `@name.md` line to `gates/GATES.md`, add it to `gates/ROUTING.md`. A change that adds or removes a vendor or account also updates the table above and the `/new-app` recipe in Pursey.
+Adding a gate: create the file under `gates/`, add an `@name.md` line to `gates/GATES.md`, add it to `gates/ROUTING.md`. A change that adds or removes a vendor or account also updates the table above.
 
 ## Layout
 
@@ -108,8 +110,9 @@ gates/
 ├── GATES.md              # entry point: imports every gate; consuming repos import this file
 ├── ROUTING.md            # which gates apply to which task
 └── *.md                  # the eight gates
-hooks/hooks.json          # wires check-gates.mjs into SessionStart
-scripts/check-gates.mjs   # confirms the import is in place; warns if not; never carries gate text
+hooks/hooks.json          # SessionStart → check-gates.mjs; InstructionsLoaded + UserPromptSubmit → confirm-gates-loaded.mjs
+scripts/check-gates.mjs   # confirms the import line is in place; warns if not; never carries gate text
+scripts/confirm-gates-loaded.mjs  # records the GATES.md load; warns on the first prompt when it didn't happen
 skills/                   # /commit, /implement-code, /review-code
 agents/                   # security-reviewer
 CLAUDE.md                 # notes for Claude when working on this repo itself

@@ -9,7 +9,7 @@ The schema lives **in code** as SQL migration files under `supabase/migrations/`
 - **Append-only.** Once a migration is merged, never edit it. If it was wrong, write a new migration that corrects it.
 - **One logical change per migration.** Adding a table, adding a column, changing a constraint — each is its own file.
 - **Every migration is idempotent. No exceptions.** We do not write down-migrations, and Supabase is not rolled back when someone locally reverts a commit. A migration that ran, was reverted in git, and is re-applied must succeed on a database where its effects already exist. Use the patterns below — `CREATE … IF NOT EXISTS`, `DROP … IF EXISTS`, `CREATE OR REPLACE`, `ON CONFLICT DO NOTHING`, and `DO` blocks for objects without native `IF [NOT] EXISTS` support.
-- **Test it twice.** `supabase db reset` rebuilds the local database from every migration in order — run it after writing one to confirm the whole chain applies. Then run it a **second** time; the second run must be a no-op, not an error. That's the idempotency check, and CI runs it too.
+- **Prove it re-applies.** `supabase db reset` builds the local database from empty, so it proves the chain applies but never that it re-applies. `pnpm db:check` does both: a reset, then every migration run again on top — `supabase db reset && for f in supabase/migrations/*.sql; do supabase db query --local -f "$f" || exit 1; done`. Any error fails it. That's the idempotency check, and CI runs it too.
 - **RLS policies are part of the schema** — a new table's migration enables RLS and defines its policies in the same file.
 
 ### Workflow — Supabase CLI
@@ -24,7 +24,8 @@ supabase link --project-ref <project-ref>       # connect this repo to the app's
 # The change loop
 supabase start                                  # local stack (pnpm db:start)
 supabase migration new <description>            # supabase/migrations/<timestamp>_<description>.sql — write idempotent SQL
-supabase db reset && supabase db reset          # applies the chain, then proves it re-applies (pnpm db:reset)
+supabase db reset                               # rebuilds the local database from every migration (pnpm db:reset)
+pnpm db:check                                   # reset, then re-runs every migration on top — the idempotency check
 supabase gen types typescript --local > src/types/database.types.ts   # pnpm db:types
 supabase db push                                # pending migrations → the hosted project (pnpm db:push)
 ```
@@ -126,7 +127,7 @@ updated_at  timestamptz NOT NULL DEFAULT now()
 ### Constraints
 
 - **NOT NULL by default.** Allow NULL only when the value is genuinely optional in the domain.
-- **CHECK constraints for enum-like columns** — `status text NOT NULL CHECK (status IN ('draft','active','archived'))`. Mirror the allowed set as a Zod enum in the matching `src/schemas/<domain>.schema.ts` with a one-line comment naming the constraint, so the two don't drift.
+- **CHECK constraints for enum-like columns** — `status text NOT NULL CHECK (status IN ('draft','active','archived'))`. Mirror the allowed set as a Zod enum in the matching `src/schemas/` file with a one-line comment naming the constraint, so the two don't drift.
 - **Foreign keys always declare `ON DELETE`** explicitly — `CASCADE`, `SET NULL`, or `RESTRICT`. Spell out the intent.
 - **UNIQUE-index external idempotency keys** — a column holding an id from another system that a handler treats as a single-row key (a webhook event id, a push token) gets a UNIQUE constraint so a duplicate delivery fails loudly at INSERT instead of silently creating a second row.
 
@@ -174,14 +175,5 @@ Every app's first five migrations are this skeleton. They are the worked example
 | `set_updated_at` | the shared touch trigger function (`plpgsql`, `SET search_path = ''`), applied to every table with `updated_at` |
 | `profile` | one row per auth user: `id` references `auth.users` with cascade, `display_name`; RLS read/update own; `handle_new_user()` (`SECURITY DEFINER`) inserts it from an `AFTER INSERT ON auth.users` trigger with `ON CONFLICT DO NOTHING` — the app never creates profiles |
 | `app_config` | `key text PRIMARY KEY, value jsonb NOT NULL, updated_at` with the touch trigger; RLS `SELECT TO anon, authenticated USING (true)`, **no write policies**; seeds `ads_enabled = false` and `min_supported_version = "1.0.0"` with `ON CONFLICT (key) DO NOTHING` |
-| `delete_my_account` | `SECURITY DEFINER` SQL function that runs `DELETE FROM auth.users WHERE id = auth.uid()`; `REVOKE EXECUTE … FROM public, anon`, `GRANT EXECUTE … TO authenticated`; the cascades remove every user-owned row. Storage has no cascade from `auth.users`: an app with uploads adds `DELETE FROM storage.objects WHERE owner_id = (SELECT auth.uid())::text` before it |
+| `delete_my_account` | `SECURITY DEFINER` SQL function that runs `DELETE FROM auth.users WHERE id = auth.uid()`; `REVOKE EXECUTE … FROM public, anon`, `GRANT EXECUTE … TO authenticated`; the cascades remove every user-owned row. Storage has no cascade from `auth.users`, and Supabase blocks SQL deletes from `storage.objects`: an app with uploads removes the user's files through the Storage API before calling it (`store-and-monetisation` → Account deletion) |
 | `device_push_token` | `user_id DEFAULT auth.uid()` with cascade, `token text UNIQUE`, `platform CHECK (platform IN ('ios', 'android'))`; RLS `FOR ALL TO authenticated` on own rows; index on `user_id`; touch trigger; `register_push_token(p_token, p_platform)` (`SECURITY DEFINER`, authenticated only) upserts the row and moves the token to the caller — a push token identifies the device, so the last signer-in owns it |
-
-## Don'ts
-
-- Don't write a non-idempotent migration "because it only runs once" — there are no down-migrations; a revert + re-apply fails on anything unguarded.
-- Don't edit a merged migration — write a new one.
-- Don't disable RLS to debug a query — use the SQL editor as a privileged role. RLS-off in code is how data leaks.
-- Don't put business logic in triggers — `set_updated_at` and `handle_new_user` are invariants, not features.
-- Don't store structured data as a JSON blob when columns would do — `app_config` is the deliberate exception, because its values are hand-edited switches.
-- Don't use sequential IDs for anything user-facing — they leak record counts and make scraping easy.

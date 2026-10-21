@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Implement Code
 
-You are about to implement code in a React Native (Expo) project. The engineering standards are loaded in full through the `GATES.md` import in this repo's `CLAUDE.md` — apply them; do not write a line that violates them. If the `SessionStart` hook warned that the gates are not loaded, Read every gate from the gate root it names before continuing.
+You are about to implement code in a React Native (Expo) project. The engineering standards are loaded in full through the `GATES.md` import in this repo's `CLAUDE.md` — apply them; do not write a line that violates them. If a hook warned that the gates are not loaded, Read every gate from the gate root it names before continuing.
 
 ## Step 1 — Understand the request
 
@@ -43,13 +43,13 @@ Write the code. Use this checklist before outputting each file:
 - [ ] One component per file; parent owns logic, sub-components render
 - [ ] Server data via TanStack Query hooks (never mirrored into Zustand); forms via RHF + Zod
 - [ ] Loading / empty / error states all handled; long lists use `FlatList`/`FlashList`
-- [ ] Navigation via Expo Router typed routes; `NativeTabs` for tabs; auth gated with `Stack.Protected` in the root layout
+- [ ] Navigation via Expo Router typed routes; `NativeTabs` for tabs, each pushing tab with its own `Stack`; auth gated with `Stack.Protected` in `AppShell`
 - [ ] No hand-written memoisation (the React Compiler is on); adaptive layout at `md:` for iPad
 
 **Data layer**
 - [ ] Supabase client imported only in `src/lib/`; one fetcher per operation in `lib/api/<domain>.ts` with explicit columns, `unwrap`/`assertOk`, a row mapper
 - [ ] `<domain>.cache.ts` with a key factory and `queryOptions` factories; one hook per file; no barrels
-- [ ] Mutations invalidate the narrowest prefix; sign-out clears the query client and the persister
+- [ ] Mutations invalidate the narrowest prefix; the auth listener clears the query client and the persister on every sign-out
 
 **Edge Functions**
 - [ ] Web-standard `Request`/`Response`, `npm:` imports; `Deno.*` only in `_shared/runtime.ts`
@@ -57,7 +57,7 @@ Write the code. Use this checklist before outputting each file:
 - [ ] Secrets via `getEnv`; webhooks check the shared secret and are idempotent; logs are shaped fields
 
 **Database**
-- [ ] Migration is idempotent (`IF NOT EXISTS` / `DROP … IF EXISTS` / `DO`-block guards); `db reset` run twice
+- [ ] Migration is idempotent (`IF NOT EXISTS` / `DROP … IF EXISTS` / `DO`-block guards); `pnpm db:check` passes
 - [ ] RLS enabled + per-action policies in the same migration; `snake_case`, singular table name; `user_id DEFAULT auth.uid()`
 - [ ] Types regenerated and committed (`pnpm db:types`)
 

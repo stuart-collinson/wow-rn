@@ -7,7 +7,7 @@ allowed-tools: Bash(git *)
 
 # Review Code
 
-A full pre-PR review against the standards loaded in full through the `GATES.md` import in this repo's `CLAUDE.md`. If the `SessionStart` hook warned that the gates are not loaded, Read them from the gate root it names first. Follow every step in order.
+A full pre-PR review against the standards loaded in full through the `GATES.md` import in this repo's `CLAUDE.md`. If a hook warned that the gates are not loaded, Read them from the gate root it names first. Follow every step in order.
 
 ## Step 1 — Collect the full diff
 
